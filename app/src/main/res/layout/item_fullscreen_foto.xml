@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FF000000">
+
+    <!-- Das NEUE zoombare Bild (Ersetzt das alte ImageView) -->
+    <com.github.chrisbanes.photoview.PhotoView
+        android:id="@+id/image_fullscreen_item"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- NEU: Der echte Video-Player (Startet unsichtbar) -->
+    <VideoView
+        android:id="@+id/video_fullscreen_item"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:visibility="gone"/>
+
+    <!-- NEU: Der große Play-Button für die Mitte -->
+    <ImageView
+        android:id="@+id/btn_play_fullscreen_video"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:layout_gravity="center"
+        android:src="@android:drawable/ic_media_play"
+        app:tint="#FFFFFF"
+        android:background="@drawable/bg_pill_selected"
+        android:backgroundTint="#80000000"
+        android:padding="16dp"
+        android:visibility="gone" />
+
+</FrameLayout>

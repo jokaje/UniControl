@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_bottom_sheet"
+    android:backgroundTint="@color/pastel_pink"
+    android:padding="24dp">
+
+    <!-- Leicht durchsichtiges Weiß für den Griff -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:background="#80FFFFFF"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="16dp"/>
+
+    <TextView
+        android:id="@+id/tv_bs_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Aktion auswählen"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        android:layout_marginBottom="24dp"
+        android:layout_gravity="center_horizontal"/>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fadeScrollbars="false">
+
+        <LinearLayout
+            android:id="@+id/layout_bs_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="24dp"/>
+    </ScrollView>
+
+</LinearLayout>

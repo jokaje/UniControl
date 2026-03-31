@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <!-- Wir nutzen ein etwas dunkleres Pink (oder Grau), damit es sich vom weißen Hintergrund abhebt -->
+    <solid android:color="#E08CB4" /> <!-- Ein etwas kräftigeres Pastell-Pink -->
+    <corners android:radius="20dp" />
+</shape>

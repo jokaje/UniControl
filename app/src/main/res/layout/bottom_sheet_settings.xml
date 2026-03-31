@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_bottom_sheet"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:layout_gravity="center_horizontal"
+            android:text="Netzwerk Einstellungen"
+            android:textColor="#333333"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Dein Heim-WLAN (SSID):"
+            android:textColor="#555555"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/et_home_ssid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            android:hint="z.B. FritzBox_Josua"
+            android:textColor="#333333"
+            android:textColorHint="#888888"
+            android:inputType="textNoSuggestions" />
+
+        <!-- 1. Echo -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1. Echo"
+            android:textColor="#333333"
+            android:textStyle="bold" />
+        <EditText
+            android:id="@+id/et_echo_local"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Lokale IP (z.B. 192.168.178.50:8080)"
+            android:textColor="#333333"
+            android:textColorHint="#888888" />
+        <EditText
+            android:id="@+id/et_echo_public"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:hint="Öffentliche URL"
+            android:textColor="#333333"
+            android:textColorHint="#888888" />
+
+        <!-- 2. Open Web UI -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="2. Open Web UI"
+            android:textColor="#333333"
+            android:textStyle="bold" />
+        <EditText
+            android:id="@+id/et_web_local"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Lokale IP"
+            android:textColor="#333333"
+            android:textColorHint="#888888" />
+        <EditText
+            android:id="@+id/et_web_public"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:hint="Öffentliche URL"
+            android:textColor="#333333"
+            android:textColorHint="#888888" />
+
+        <!-- 3. Home -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="3. Home"
+            android:textColor="#333333"
+            android:textStyle="bold" />
+        <EditText
+            android:id="@+id/et_home_local"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Lokale IP"
+            android:textColor="#333333"
+            android:textColorHint="#888888" />
+        <EditText
+            android:id="@+id/et_home_public"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:hint="Öffentliche URL"
+            android:textColor="#333333"
+            android:textColorHint="#888888" />
+
+        <!-- 4. Fotos (Immich API Setup) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="4. Fotos (Immich)"
+            android:textColor="#333333"
+            android:textStyle="bold" />
+        <EditText
+            android:id="@+id/et_fotos_local"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Lokale IP"
+            android:textColor="#333333"
+            android:textColorHint="#888888" />
+        <EditText
+            android:id="@+id/et_fotos_public"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Öffentliche URL"
+            android:textColor="#333333"
+            android:textColorHint="#888888" />
+
+        <!-- NEU: Das Feld für den Immich API Key -->
+        <EditText
+            android:id="@+id/et_fotos_api_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            android:hint="Immich API Key (Geheim)"
+            android:inputType="textPassword"
+            android:textColor="#333333"
+            android:textColorHint="#888888" />
+
+        <Button
+            android:id="@+id/btn_save_settings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:backgroundTint="#8CA8B3"
+            android:padding="16dp"
+            android:text="Einstellungen Speichern"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

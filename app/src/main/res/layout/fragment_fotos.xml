@@ -1,0 +1,458 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Custom Top Tab Bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="8dp"
+            android:gravity="center"
+            android:background="#FFFFFF"
+            android:elevation="4dp">
+
+            <TextView android:id="@+id/tab_fotos" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Fotos" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
+            <TextView android:id="@+id/tab_suche" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Suche" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
+            <TextView android:id="@+id/tab_alben" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Alben" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
+            <TextView android:id="@+id/tab_bibliothek" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Bibliothek" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <!-- 1. FOTOS -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recycler_view_fotos"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingBottom="100dp"
+                android:visibility="visible"/>
+
+            <!-- 2. SUCHE -->
+            <androidx.core.widget.NestedScrollView
+                android:id="@+id/layout_search"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingBottom="100dp">
+
+                    <EditText
+                        android:id="@+id/et_search_input"
+                        android:layout_width="match_parent"
+                        android:layout_height="50dp"
+                        android:layout_margin="16dp"
+                        android:background="@drawable/bg_pill_selected"
+                        android:backgroundTint="#FFFFFF"
+                        android:elevation="2dp"
+                        android:hint="🔍 Fotos, Orte, Personen..."
+                        android:imeOptions="actionSearch"
+                        android:inputType="text"
+                        android:paddingHorizontal="16dp"
+                        android:textColor="#333333"
+                        android:textColorHint="#888888" />
+
+                    <!-- Hier landen die Suchergebnisse -->
+                    <TextView
+                        android:id="@+id/tv_search_loading"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="32dp"
+                        android:text="KI durchsucht Cloud..."
+                        android:textAlignment="center"
+                        android:textColor="#888888"
+                        android:visibility="gone" />
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/recycler_view_search"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:nestedScrollingEnabled="false"
+                        android:visibility="gone" />
+
+                    <!-- Die Schnellauswahl für die Suche -->
+                    <LinearLayout
+                        android:id="@+id/layout_search_categories"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginHorizontal="16dp"
+                        android:layout_marginBottom="16dp"
+                        android:orientation="horizontal"
+                        android:weightSum="4">
+
+                        <!-- Personen Button -->
+                        <LinearLayout
+                            android:id="@+id/btn_search_personen"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+                            <com.google.android.material.card.MaterialCardView
+                                android:layout_width="50dp"
+                                android:layout_height="50dp"
+                                app:cardCornerRadius="25dp"
+                                app:cardElevation="2dp"
+                                app:cardBackgroundColor="#FFFFFF"
+                                app:strokeWidth="0dp">
+                                <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="👤" android:textSize="24sp" />
+                            </com.google.android.material.card.MaterialCardView>
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Personen" android:textColor="#555555" android:textSize="12sp" android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <!-- Ort Button -->
+                        <LinearLayout
+                            android:id="@+id/btn_search_ort"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+                            <com.google.android.material.card.MaterialCardView
+                                android:layout_width="50dp"
+                                android:layout_height="50dp"
+                                app:cardCornerRadius="25dp"
+                                app:cardElevation="2dp"
+                                app:cardBackgroundColor="#FFFFFF"
+                                app:strokeWidth="0dp">
+                                <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="📍" android:textSize="24sp" />
+                            </com.google.android.material.card.MaterialCardView>
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Orte" android:textColor="#555555" android:textSize="12sp" android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <!-- Datum Button -->
+                        <LinearLayout
+                            android:id="@+id/btn_search_datum"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+                            <com.google.android.material.card.MaterialCardView
+                                android:layout_width="50dp"
+                                android:layout_height="50dp"
+                                app:cardCornerRadius="25dp"
+                                app:cardElevation="2dp"
+                                app:cardBackgroundColor="#FFFFFF"
+                                app:strokeWidth="0dp">
+                                <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="📅" android:textSize="24sp" />
+                            </com.google.android.material.card.MaterialCardView>
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Datum" android:textColor="#555555" android:textSize="12sp" android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <!-- Medientyp Button -->
+                        <LinearLayout
+                            android:id="@+id/btn_search_medientyp"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+                            <com.google.android.material.card.MaterialCardView
+                                android:layout_width="50dp"
+                                android:layout_height="50dp"
+                                app:cardCornerRadius="25dp"
+                                app:cardElevation="2dp"
+                                app:cardBackgroundColor="#FFFFFF"
+                                app:strokeWidth="0dp">
+                                <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="🎞️" android:textSize="24sp" />
+                            </com.google.android.material.card.MaterialCardView>
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Medien" android:textColor="#555555" android:textSize="12sp" android:textStyle="bold" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- Weitere Such-Kategorien (Kamera & Einstellungen fehlten hier!) -->
+                    <LinearLayout
+                        android:id="@+id/layout_search_bottom_buttons"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginHorizontal="16dp">
+
+                        <TextView
+                            android:id="@+id/btn_search_recent"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:background="@drawable/bg_pill_selected"
+                            android:backgroundTint="#FFFFFF"
+                            android:padding="16dp"
+                            android:text="🕒  Kürzlich aufgenommen"
+                            android:textColor="#333333"
+                            android:textSize="16sp"
+                            android:textStyle="bold"
+                            android:elevation="2dp"/>
+
+                        <TextView
+                            android:id="@+id/btn_search_videos"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:background="@drawable/bg_pill_selected"
+                            android:backgroundTint="#FFFFFF"
+                            android:padding="16dp"
+                            android:text="🎥  Videos"
+                            android:textColor="#333333"
+                            android:textSize="16sp"
+                            android:textStyle="bold"
+                            android:elevation="2dp"/>
+
+                        <!-- HIER SIND DIE BEIDEN FEHLENDEN BUTTONS -->
+                        <TextView
+                            android:id="@+id/btn_search_kamera"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:background="@drawable/bg_pill_selected"
+                            android:backgroundTint="#FFFFFF"
+                            android:padding="16dp"
+                            android:text="📷  Nach Kamera filtern"
+                            android:textColor="#333333"
+                            android:textSize="16sp"
+                            android:textStyle="bold"
+                            android:elevation="2dp"/>
+
+                        <TextView
+                            android:id="@+id/btn_search_einstellungen"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
+                            android:background="@drawable/bg_pill_selected"
+                            android:backgroundTint="#FFFFFF"
+                            android:padding="16dp"
+                            android:text="⚙️  Such-Einstellungen"
+                            android:textColor="#333333"
+                            android:textSize="16sp"
+                            android:textStyle="bold"
+                            android:elevation="2dp"/>
+                    </LinearLayout>
+                </LinearLayout>
+            </androidx.core.widget.NestedScrollView>
+
+            <!-- 3. ALBEN -->
+            <LinearLayout
+                android:id="@+id/layout_albums"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <EditText
+                    android:id="@+id/et_album_search"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:layout_margin="16dp"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#FFFFFF"
+                    android:elevation="2dp"
+                    android:hint="🔍 Album suchen..."
+                    android:inputType="text"
+                    android:paddingHorizontal="16dp"
+                    android:textColor="#333333"
+                    android:textColorHint="#888888" />
+
+                <TextView
+                    android:id="@+id/tv_albums_loading"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="32dp"
+                    android:text="Lade Alben..."
+                    android:textAlignment="center"
+                    android:textColor="#888888"
+                    android:visibility="gone" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recycler_view_albums"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:paddingHorizontal="8dp"
+                    android:paddingBottom="100dp" />
+            </LinearLayout>
+
+            <!-- 4. BIBLIOTHEK (NEU) -->
+            <androidx.core.widget.NestedScrollView
+                android:id="@+id/layout_library"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:paddingBottom="100dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Bibliothek"
+                        android:textSize="28sp"
+                        android:textStyle="bold"
+                        android:textColor="#333333"
+                        android:layout_marginBottom="24dp"/>
+
+                    <TextView
+                        android:id="@+id/btn_search_favorites"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:background="@drawable/bg_pill_selected"
+                        android:backgroundTint="#FFFFFF"
+                        android:padding="16dp"
+                        android:text="❤️  Favoriten"
+                        android:textColor="#333333"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:elevation="2dp"/>
+
+                    <TextView
+                        android:id="@+id/btn_search_archive"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:background="@drawable/bg_pill_selected"
+                        android:backgroundTint="#FFFFFF"
+                        android:padding="16dp"
+                        android:text="🗃️  Archiv"
+                        android:textColor="#333333"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:elevation="2dp"/>
+
+                    <TextView
+                        android:id="@+id/btn_search_locked"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_pill_selected"
+                        android:backgroundTint="#FFFFFF"
+                        android:padding="16dp"
+                        android:text="🔒  Gesperrter Ordner (Tresor)"
+                        android:textColor="#333333"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:elevation="2dp"/>
+                </LinearLayout>
+            </androidx.core.widget.NestedScrollView>
+
+            <TextView
+                android:id="@+id/tv_fotos_placeholder"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="Lade Bilder..."
+                android:textColor="#888888"
+                android:visibility="gone" />
+
+        </FrameLayout>
+    </LinearLayout>
+
+    <!-- Fullscreen Overlay -->
+    <androidx.coordinatorlayout.widget.CoordinatorLayout
+        android:id="@+id/fullscreen_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:elevation="10dp"
+        android:background="#000000">
+
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/view_pager_fullscreen"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Obere Leiste mit Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="end|center_vertical"
+            android:padding="16dp"
+            android:layout_gravity="top"
+            android:background="#40000000">
+
+            <TextView
+                android:id="@+id/btn_close_fullscreen"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✕"
+                android:textSize="24sp"
+                android:textColor="#FFFFFF"
+                android:padding="8dp"
+                android:layout_weight="1" />
+
+            <ImageView
+                android:id="@+id/btn_favorite"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:src="@android:drawable/btn_star"
+                app:tint="#FFFFFF"
+                android:layout_marginEnd="16dp" />
+
+            <ImageView
+                android:id="@+id/btn_more_options"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:src="@android:drawable/ic_menu_more"
+                app:tint="#FFFFFF" />
+        </LinearLayout>
+
+        <!-- Unten: Kleines Menü zum Hochwischen -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:padding="16dp"
+            android:layout_gravity="bottom"
+            android:background="#40000000">
+
+            <ImageView android:id="@+id/btn_share" android:layout_width="24dp" android:layout_height="24dp" android:src="@android:drawable/ic_menu_share" app:tint="#FFFFFF" android:layout_weight="1"/>
+            <ImageView android:id="@+id/btn_edit" android:layout_width="24dp" android:layout_height="24dp" android:src="@android:drawable/ic_menu_edit" app:tint="#FFFFFF" android:layout_weight="1"/>
+            <ImageView android:id="@+id/btn_add_to" android:layout_width="24dp" android:layout_height="24dp" android:src="@android:drawable/ic_menu_add" app:tint="#FFFFFF" android:layout_weight="1"/>
+            <ImageView android:id="@+id/btn_delete" android:layout_width="24dp" android:layout_height="24dp" android:src="@android:drawable/ic_menu_delete" app:tint="#FFFFFF" android:layout_weight="1"/>
+        </LinearLayout>
+
+        <!-- Das große Bottom Sheet mit Meta-Daten -->
+        <LinearLayout
+            android:id="@+id/bottom_sheet_details"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:background="@drawable/bg_bottom_sheet"
+            app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+            app:behavior_hideable="true"
+            app:behavior_peekHeight="300dp"
+            android:padding="24dp"
+            android:elevation="16dp">
+
+            <View android:layout_width="40dp" android:layout_height="4dp" android:background="#80FFFFFF" android:layout_gravity="center_horizontal" android:layout_marginBottom="16dp"/>
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Bild-Details" android:textSize="20sp" android:textColor="#333333" android:textStyle="bold" android:layout_marginBottom="24dp"/>
+
+            <EditText android:id="@+id/et_detail_description" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Beschreibung hinzufügen..." android:textColor="#333333" android:textColorHint="#888888" android:background="@android:color/transparent" android:textSize="16sp" android:layout_marginBottom="24dp"/>
+
+            <TextView android:id="@+id/tv_detail_date" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Datum" android:textColor="#555555" android:textSize="14sp" android:layout_marginBottom="16dp" android:drawablePadding="8dp"/>
+            <TextView android:id="@+id/tv_detail_location" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ort" android:textColor="#555555" android:textSize="14sp" android:layout_marginBottom="16dp" android:drawablePadding="8dp"/>
+            <TextView android:id="@+id/tv_detail_camera" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Kamera" android:textColor="#555555" android:textSize="14sp" android:layout_marginBottom="16dp" android:drawablePadding="8dp"/>
+            <TextView android:id="@+id/tv_detail_filename" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Dateiname" android:textColor="#888888" android:textSize="12sp"/>
+
+        </LinearLayout>
+    </androidx.coordinatorlayout.widget.CoordinatorLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

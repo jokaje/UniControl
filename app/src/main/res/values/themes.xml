@@ -1,0 +1,23 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. Das "NoActionBar" am Ende entfernt die lila Leiste oben! -->
+    <style name="Theme.UniControl" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+
+        <!-- Deine Pastell-Akzentfarben -->
+        <item name="colorPrimary">@color/pastel_blue</item>
+        <item name="colorPrimaryVariant">#8CA8B3</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/pastel_pink</item>
+        <item name="colorSecondaryVariant">#D87A9F</item>
+        <item name="colorOnSecondary">@color/black</item>
+
+        <!-- Dieser Befehl macht die App zum echten Vollbild (blendet Uhrzeit/Akku Leiste aus) -->
+        <item name="android:windowFullscreen">true</item>
+
+    </style>
+
+    <!-- NEU: Dieser Style macht die Ecken der Fotos im Raster leicht rund (z.B. 8dp) -->
+    <style name="RoundedImageStyle" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">8dp</item>
+    </style>
+</resources>

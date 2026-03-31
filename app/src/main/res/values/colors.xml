@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Helle Pastellfarben für deine Super App -->
+    <color name="pastel_blue">#AEC6CF</color>      <!-- Für das Echo / Akzente -->
+    <color name="pastel_green">#B2D3C2</color>     <!-- Für Home / Erfolgsmeldungen -->
+    <color name="pastel_pink">#F49AC2</color>      <!-- Für Fotos / Highlights -->
+    <color name="pastel_yellow">#FDFD96</color>    <!-- Für Open Web UI -->
+    <color name="pastel_grey">#EAEAEA</color>      <!-- Für inaktive Icons -->
+    <color name="black">#000000</color>
+    <color name="white">#FFFFFF</color>
+
+    <color name="background_light">#FAFAFA</color> <!-- Sehr helles Grau/Weiß für den Hintergrund -->
+
+    <!-- Standard Android Material Colors (angepasst auf Pastell) -->
+    <color name="colorPrimary">@color/pastel_blue</color>
+    <color name="colorPrimaryVariant">#8CA8B3</color>
+    <color name="colorOnPrimary">#FFFFFF</color>
+    <color name="colorSecondary">@color/pastel_pink</color>
+    <color name="colorSecondaryVariant">#D87A9F</color>
+    <color name="colorOnSecondary">#FFFFFF</color>
+</resources>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 1. Echo (Roboter-Kopf) -->
+    <item
+        android:id="@+id/nav_echo"
+        android:icon="@drawable/ic_robot"
+        android:title="Echo" />
+
+    <!-- 2. Open Web UI (Weltkugel) -->
+    <item
+        android:id="@+id/nav_web"
+        android:icon="@drawable/ic_globe"
+        android:title="Open Web UI" />
+
+    <!-- 3. Home (Haus) -->
+    <item
+        android:id="@+id/nav_home"
+        android:icon="@drawable/ic_home"
+        android:title="Home" />
+
+    <!-- 4. Fotos (Blume) -->
+    <item
+        android:id="@+id/nav_fotos"
+        android:icon="@drawable/ic_flower"
+        android:title="Fotos" />
+
+    <!-- 5. Einstellungen (Zahnrad) -->
+    <item
+        android:id="@+id/nav_settings"
+        android:icon="@drawable/ic_settings"
+        android:title="Einstellungen" />
+</menu>

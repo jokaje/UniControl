@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:theme="@style/Theme.MaterialComponents.Light"
+    android:background="@drawable/bg_bottom_sheet"
+    android:backgroundTint="@color/pastel_pink"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:background="#80FFFFFF" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="24dp"
+        android:text="Ort auswählen"
+        android:textColor="#333333"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <!-- Dropdown 1: Land -->
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        app:hintTextColor="#555555"
+        app:boxBackgroundColor="#FFFFFF"
+        app:boxCornerRadiusBottomEnd="16dp"
+        app:boxCornerRadiusBottomStart="16dp"
+        app:boxCornerRadiusTopEnd="16dp"
+        app:boxCornerRadiusTopStart="16dp">
+
+        <AutoCompleteTextView
+            android:id="@+id/actv_country"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Land (z.B. Deutschland)"
+            android:textColor="#333333"
+            android:textColorHint="#999999"
+            android:inputType="text" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <!-- Dropdown 2: Bundesland / Provinz -->
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        app:hintTextColor="#555555"
+        app:boxBackgroundColor="#FFFFFF"
+        app:boxCornerRadiusBottomEnd="16dp"
+        app:boxCornerRadiusBottomStart="16dp"
+        app:boxCornerRadiusTopEnd="16dp"
+        app:boxCornerRadiusTopStart="16dp">
+
+        <AutoCompleteTextView
+            android:id="@+id/actv_state"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Bundesland / Provinz"
+            android:textColor="#333333"
+            android:textColorHint="#999999"
+            android:inputType="text" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <!-- Dropdown 3: Stadt -->
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="32dp"
+        app:hintTextColor="#555555"
+        app:boxBackgroundColor="#FFFFFF"
+        app:boxCornerRadiusBottomEnd="16dp"
+        app:boxCornerRadiusBottomStart="16dp"
+        app:boxCornerRadiusTopEnd="16dp"
+        app:boxCornerRadiusTopStart="16dp">
+
+        <AutoCompleteTextView
+            android:id="@+id/actv_city"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Stadt (z.B. Schopfheim)"
+            android:textColor="#333333"
+            android:textColorHint="#999999"
+            android:inputType="text" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <!-- Die zwei runden Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:weightSum="2">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_clear_location"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="60dp"
+            android:layout_marginEnd="8dp"
+            android:layout_weight="1"
+            android:text="Leeren"
+            android:textColor="#555555"
+            app:backgroundTint="#FFFFFF"
+            app:cornerRadius="30dp"
+            app:strokeColor="#CCCCCC" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_apply_location"
+            android:layout_width="0dp"
+            android:layout_height="60dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:text="Filter anwenden"
+            android:textColor="#FFFFFF"
+            app:backgroundTint="#8CA8B3"
+            app:cornerRadius="30dp" />
+    </LinearLayout>
+</LinearLayout>

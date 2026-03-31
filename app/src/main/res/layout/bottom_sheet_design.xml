@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_bottom_sheet"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            android:layout_gravity="center_horizontal"
+            android:text="Design &amp; Farben"
+            android:textColor="#333333"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="Gib hier die gewünschten HEX-Farbcodes für die einzelnen Tabs ein (z.B. #AEC6CF)."
+            android:textColor="#666666"
+            android:textSize="14sp" />
+
+        <!-- Echo Farbe -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="1. Echo (Roboter)" android:textColor="#333333" android:textStyle="bold" />
+        <EditText android:id="@+id/et_color_echo" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:hint="#AEC6CF" android:textColor="#333333" />
+
+        <!-- Web UI Farbe -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2. Open Web UI (Weltkugel)" android:textColor="#333333" android:textStyle="bold" />
+        <EditText android:id="@+id/et_color_web" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:hint="#FDFD96" android:textColor="#333333" />
+
+        <!-- Home Farbe -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="3. Home (Haus)" android:textColor="#333333" android:textStyle="bold" />
+        <EditText android:id="@+id/et_color_home" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:hint="#B2D3C2" android:textColor="#333333" />
+
+        <!-- Fotos Farbe -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4. Fotos (Blume)" android:textColor="#333333" android:textStyle="bold" />
+        <EditText android:id="@+id/et_color_fotos" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:hint="#F49AC2" android:textColor="#333333" />
+
+        <!-- Settings Farbe -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="5. Einstellungen (Zahnrad)" android:textColor="#333333" android:textStyle="bold" />
+        <EditText android:id="@+id/et_color_settings" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="24dp" android:hint="#EAEAEA" android:textColor="#333333" />
+
+        <Button
+            android:id="@+id/btn_save_colors"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:backgroundTint="#8CA8B3"
+            android:padding="16dp"
+            android:text="Farben Speichern"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

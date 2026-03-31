@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Für normales Teilen (WhatsApp etc.) -->
+    <cache-path name="shared_images" path="shared_images/" />
+    <!-- NEU: Für strenge Apps wie Google Fotos (Bearbeitung) -->
+    <external-files-path name="external_files_images" path="Pictures/shared_images/" />
+</paths>
