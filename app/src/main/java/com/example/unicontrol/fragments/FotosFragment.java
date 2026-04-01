@@ -552,16 +552,16 @@ public class FotosFragment extends Fragment {
             view.findViewById(R.id.btn_search_videos).setOnClickListener(v -> performCloudMetadataSearch("{\"type\": \"VIDEO\", \"withExif\": true, \"size\": 500}", "Lade alle Videos aus der Cloud..."));
         }
 
-        // --- BUTTONS AUS DER BIBLIOTHEK (HIER ÜBERGEBEN WIR DIE URL FÜR DEN GET REQUEST!) ---
+        // --- BUTTONS AUS DER BIBLIOTHEK (HIER ÜBERGEBEN WIR DIE JSON BODY STRINGS) ---
         if (view.findViewById(R.id.btn_search_favorites) != null) {
             view.findViewById(R.id.btn_search_favorites).setOnClickListener(v -> {
-                fetchSpecialAssets("/api/assets?isFavorite=true", "Lade deine Cloud-Favoriten...", 0);
+                fetchSpecialAssets("{\"isFavorite\": true, \"withExif\": true}", "Lade deine Cloud-Favoriten...", 0);
             });
         }
 
         if (view.findViewById(R.id.btn_search_archive) != null) {
             view.findViewById(R.id.btn_search_archive).setOnClickListener(v -> {
-                fetchSpecialAssets("/api/assets?isArchived=true", "Lade dein Archiv...", 1);
+                fetchSpecialAssets("{\"isArchived\": true, \"withExif\": true}", "Lade dein Archiv...", 1);
             });
         }
 
@@ -570,8 +570,7 @@ public class FotosFragment extends Fragment {
         }
     }
 
-    // --- REPARATUR: DIESE METHODE NUTZT NUN WIE VERSPROCHEN DEN ECHTEN GET-ENDPUNKT ---
-    private void fetchSpecialAssets(String urlSuffix, String loadingMessage, int mode) {
+    private void fetchSpecialAssets(String jsonBody, String loadingMessage, int mode) {
         if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
 
         prepareForSearchResults();
@@ -583,25 +582,19 @@ public class FotosFragment extends Fragment {
             try {
                 String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
 
-                // Nutzt den echten, funktionierenden GET Endpunkt von Immich!
-                URL url = new URL(cleanBaseUrl + urlSuffix);
+                // Wir nutzen jetzt den POST Search-Metadata Endpunkt statt den alten GET Endpunkt!
+                URL url = new URL(cleanBaseUrl + "/api/search/metadata");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("GET");
+                conn.setRequestMethod("POST");
                 conn.setRequestProperty("x-api-key", currentApiKey);
                 conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+
+                // Den JSON-Body aus dem Aufruf mitsenden
+                conn.getOutputStream().write(jsonBody.getBytes());
 
                 int responseCode = conn.getResponseCode();
-
-                // Falls der Endpunkt bei sehr alten Immich Versionen anders heißt
-                if (responseCode == 404 || responseCode == 405) {
-                    String fallbackSuffix = urlSuffix.replace("/api/assets", "/api/asset");
-                    url = new URL(cleanBaseUrl + fallbackSuffix);
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setRequestProperty("x-api-key", currentApiKey);
-                    conn.setRequestProperty("Accept", "application/json");
-                    responseCode = conn.getResponseCode();
-                }
 
                 if (responseCode == 200 || responseCode == 201) {
                     BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
@@ -613,10 +606,11 @@ public class FotosFragment extends Fragment {
                     JsonElement root = JsonParser.parseString(response.toString());
                     List<ImmichAsset> parsedList = new ArrayList<>();
 
+                    // Immich wickelt das Ergebnis je nach API-Version leicht anders ab
                     if (root.isJsonArray()) {
                         parsedList = new Gson().fromJson(root, new TypeToken<List<ImmichAsset>>(){}.getType());
-                    } else if (root.isJsonObject() && root.getAsJsonObject().has("items")) {
-                        parsedList = new Gson().fromJson(root.getAsJsonObject().getAsJsonArray("items"), new TypeToken<List<ImmichAsset>>(){}.getType());
+                    } else if (root.isJsonObject() && root.getAsJsonObject().has("assets")) {
+                        parsedList = new Gson().fromJson(root.getAsJsonObject().getAsJsonObject("assets").getAsJsonArray("items"), new TypeToken<List<ImmichAsset>>(){}.getType());
                     }
 
                     final List<ImmichAsset> finalAssetList = parsedList;
@@ -625,7 +619,7 @@ public class FotosFragment extends Fragment {
                         getActivity().runOnUiThread(() -> {
                             extractMetadataToCache(finalAssetList);
 
-                            // DER LOKALE TÜRSTEHER!
+                            // Dein bewährter lokaler Türsteher:
                             List<ImmichAsset> filteredList = new ArrayList<>();
                             for (ImmichAsset a : finalAssetList) {
                                 String d = a.description;
@@ -1701,7 +1695,7 @@ public class FotosFragment extends Fragment {
                     Toast.makeText(getContext(), "PIN gespeichert!", Toast.LENGTH_SHORT).show();
                     if (!isViewing) executeLockAsset();
                     else {
-                        fetchSpecialAssets("/api/assets?isArchived=true", "Tresor wird geöffnet...", 2);
+                        fetchSpecialAssets("{\"isArchived\": true, \"withExif\": true}", "Tresor wird geöffnet...", 2);
                     }
                 } else {
                     Toast.makeText(getContext(), "PIN muss mind. 4 Zeichen haben.", Toast.LENGTH_SHORT).show();
@@ -1709,7 +1703,7 @@ public class FotosFragment extends Fragment {
             } else {
                 if (enteredPin.equals(savedPin)) {
                     if (isViewing) {
-                        fetchSpecialAssets("/api/assets?isArchived=true", "Tresor wird geöffnet...", 2);
+                        fetchSpecialAssets("{\"isArchived\": true, \"withExif\": true}", "Tresor wird geöffnet...", 2);
                     } else {
                         executeLockAsset();
                     }
