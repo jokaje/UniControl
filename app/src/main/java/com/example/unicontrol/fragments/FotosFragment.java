@@ -267,11 +267,13 @@ public class FotosFragment extends Fragment {
             if (parsedList != null) {
                 for (int i = 0; i < parsedList.size(); i++) {
                     JsonObject obj = itemsArray.get(i).getAsJsonObject();
-                    if (obj.has("visibility") && !obj.get("visibility").isJsonNull()) {
-                        String vis = obj.get("visibility").getAsString();
-                        parsedList.get(i).isArchived = "archive".equalsIgnoreCase(vis) || "locked".equalsIgnoreCase(vis) || "hidden".equalsIgnoreCase(vis);
-                    } else if (obj.has("isArchived") && !obj.get("isArchived").isJsonNull()) {
+                    if (obj.has("isArchived") && !obj.get("isArchived").isJsonNull()) {
                         parsedList.get(i).isArchived = obj.get("isArchived").getAsBoolean();
+                    } else if (obj.has("visibility") && !obj.get("visibility").isJsonNull()) {
+                        String vis = obj.get("visibility").getAsString();
+                        parsedList.get(i).isArchived = "archive".equalsIgnoreCase(vis);
+                    } else {
+                        parsedList.get(i).isArchived = false;
                     }
                 }
             }
@@ -303,7 +305,7 @@ public class FotosFragment extends Fragment {
 
     // --- Intelligente Live-Aktualisierung der Foto-Übersichten ---
     private void refreshVisibleGrids() {
-        // 1. Die Hauptübersicht aktualisieren
+        // 1. Die Hauptübersicht aktualisieren (aktualisiert nur die Daten, ändert aber KEINE Sichtbarkeiten!)
         if (globalAssetList != null && recyclerViewFotos != null) {
             List<ImmichAsset> safeAssets = new ArrayList<>();
             for (ImmichAsset a : globalAssetList) {
@@ -684,14 +686,13 @@ public class FotosFragment extends Fragment {
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("x-api-key", currentApiKey);
                 conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                conn.setRequestProperty("Content-Type", "application/json");
                 conn.setDoOutput(true);
 
                 conn.getOutputStream().write(jsonBody.getBytes("UTF-8"));
 
                 int responseCode = conn.getResponseCode();
 
-                // >>> FEHLER-STREAM AUSLESEN UND LOGGEN <<<
                 InputStream inputStream = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
                 StringBuilder responseBuilder = new StringBuilder();
                 if (inputStream != null) {
@@ -1176,7 +1177,7 @@ public class FotosFragment extends Fragment {
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("x-api-key", currentApiKey);
                 conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                conn.setRequestProperty("Content-Type", "application/json");
                 conn.setDoOutput(true);
 
                 conn.getOutputStream().write(jsonBody.getBytes("UTF-8"));
@@ -1292,7 +1293,7 @@ public class FotosFragment extends Fragment {
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("x-api-key", currentApiKey);
                 conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                conn.setRequestProperty("Content-Type", "application/json");
                 conn.setDoOutput(true);
 
                 String jsonBody = "{\"query\": \"" + query + "\", \"q\": \"" + query + "\", \"withExif\": true}";
@@ -1349,7 +1350,7 @@ public class FotosFragment extends Fragment {
     private void processAndDisplaySmartSearchResults(List<ImmichAsset> rawListToProcess, String baseUrl, String apiKey, RecyclerView targetRecyclerView) {
         if (getContext() == null || rawListToProcess == null || targetRecyclerView == null) return;
 
-        targetRecyclerView.setVisibility(View.VISIBLE);
+        // NICHT MEHR EINGREIFEN: targetRecyclerView.setVisibility(View.VISIBLE); WURDE ENTFERNT, UM ÜBERLAPPUNGEN ZU VERMEIDEN!
 
         Parcelable recyclerViewState = null;
         if (targetRecyclerView.getLayoutManager() != null) {
@@ -2133,6 +2134,20 @@ public class FotosFragment extends Fragment {
                             // Bild lokal aktualisieren
                             currentViewedAsset.isArchived = archiveStatus;
 
+                            // Wenn wiederhergestellt, packen wir es direkt wieder in die globale Hauptliste!
+                            if (!archiveStatus) {
+                                boolean exists = false;
+                                for (ImmichAsset a : globalAssetList) {
+                                    if (a.id.equals(currentViewedAsset.id)) {
+                                        exists = true;
+                                        break;
+                                    }
+                                }
+                                if (!exists) {
+                                    globalAssetList.add(currentViewedAsset);
+                                }
+                            }
+
                             // Live-Aktualisierung beider Grids starten!
                             refreshVisibleGrids();
 
@@ -2781,6 +2796,12 @@ public class FotosFragment extends Fragment {
                                 extractMetadataToCache(safeAssets);
                                 isLoading = false;
                                 if (tvPlaceholder != null) tvPlaceholder.setVisibility(View.GONE);
+
+                                // GANZ WICHTIG: Nur sichtbar machen, wenn wir auf dem "Fotos" Tab sind!
+                                if (tabFotos != null && tabFotos.getTypeface() != null && tabFotos.getTypeface().isBold()) {
+                                    if (recyclerViewFotos != null) recyclerViewFotos.setVisibility(View.VISIBLE);
+                                }
+
                                 processAndDisplayAssets(globalAssetList, cleanBaseUrl, apiKey, recyclerViewFotos);
                             });
                         }
@@ -2804,7 +2825,7 @@ public class FotosFragment extends Fragment {
     private void processAndDisplayAssets(List<ImmichAsset> rawListToProcess, String baseUrl, String apiKey, RecyclerView targetRecyclerView) {
         if (getContext() == null || rawListToProcess == null || targetRecyclerView == null) return;
 
-        targetRecyclerView.setVisibility(View.VISIBLE);
+        // NICHT MEHR EINGREIFEN: targetRecyclerView.setVisibility(View.VISIBLE); WURDE ENTFERNT, UM ÜBERLAPPUNGEN ZU VERMEIDEN!
 
         Parcelable recyclerViewState = null;
         if (targetRecyclerView.getLayoutManager() != null) {
