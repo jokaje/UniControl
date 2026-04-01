@@ -123,6 +123,11 @@ public class FotosFragment extends Fragment {
     private String currentApiUrl = "";
     private String currentApiKey = "";
     private List<ImmichAsset> globalAssetList = new ArrayList<>();
+
+    // Globale Merker für die intelligente, lokale Live-Aktualisierung
+    private List<ImmichAsset> lastSearchResults = new ArrayList<>();
+    private int lastSearchMode = -1; // 0=Fav, 1=Archiv, 2=Tresor, 3=Normal, 4=Smart
+
     private ImmichAsset currentViewedAsset = null;
 
     private HashMap<String, String> localDescriptions = new HashMap<>();
@@ -236,6 +241,44 @@ public class FotosFragment extends Fragment {
         hideAllMenusForSearch();
     }
 
+    // --- HILFSMETHODE FÜR NEUE API: Übersetzt 'visibility' zu 'isArchived' ---
+    private List<ImmichAsset> parseAssetsFromJson(JsonElement jsonElement) {
+        List<ImmichAsset> parsedList = new ArrayList<>();
+        JsonArray itemsArray = null;
+
+        if (jsonElement.isJsonArray()) {
+            itemsArray = jsonElement.getAsJsonArray();
+        } else if (jsonElement.isJsonObject()) {
+            JsonObject jsonObj = jsonElement.getAsJsonObject();
+            if (jsonObj.has("assets")) {
+                JsonElement assetsEl = jsonObj.get("assets");
+                if (assetsEl.isJsonArray()) {
+                    itemsArray = assetsEl.getAsJsonArray();
+                } else if (assetsEl.isJsonObject() && assetsEl.getAsJsonObject().has("items")) {
+                    itemsArray = assetsEl.getAsJsonObject().getAsJsonArray("items");
+                }
+            } else if (jsonObj.has("items")) {
+                itemsArray = jsonObj.getAsJsonArray("items");
+            }
+        }
+
+        if (itemsArray != null) {
+            parsedList = new Gson().fromJson(itemsArray, new TypeToken<List<ImmichAsset>>(){}.getType());
+            if (parsedList != null) {
+                for (int i = 0; i < parsedList.size(); i++) {
+                    JsonObject obj = itemsArray.get(i).getAsJsonObject();
+                    if (obj.has("visibility") && !obj.get("visibility").isJsonNull()) {
+                        String vis = obj.get("visibility").getAsString();
+                        parsedList.get(i).isArchived = "archive".equalsIgnoreCase(vis) || "locked".equalsIgnoreCase(vis) || "hidden".equalsIgnoreCase(vis);
+                    } else if (obj.has("isArchived") && !obj.get("isArchived").isJsonNull()) {
+                        parsedList.get(i).isArchived = obj.get("isArchived").getAsBoolean();
+                    }
+                }
+            }
+        }
+        return parsedList != null ? parsedList : new ArrayList<>();
+    }
+
     private void extractMetadataToCache(List<ImmichAsset> assets) {
         if (assets == null) return;
         for (ImmichAsset a : assets) {
@@ -254,6 +297,56 @@ public class FotosFragment extends Fragment {
             if (desc != null && !desc.trim().isEmpty()) {
                 localDescriptions.put(a.id, desc);
                 a.description = desc;
+            }
+        }
+    }
+
+    // --- Intelligente Live-Aktualisierung der Foto-Übersichten ---
+    private void refreshVisibleGrids() {
+        // 1. Die Hauptübersicht aktualisieren
+        if (globalAssetList != null && recyclerViewFotos != null) {
+            List<ImmichAsset> safeAssets = new ArrayList<>();
+            for (ImmichAsset a : globalAssetList) {
+                String d = a.description;
+                if (d == null && a.exifInfo != null) d = a.exifInfo.description;
+                if (d == null && a.exifInfo != null) d = a.exifInfo.imageDescription;
+                boolean isLocked = (d != null && d.toLowerCase().contains("#locked"));
+                boolean isArchived = (a.isArchived != null && a.isArchived);
+
+                // Im Hauptreiter werden Archiv & Tresor NIE angezeigt
+                if (!isLocked && !isArchived) {
+                    safeAssets.add(a);
+                }
+            }
+            processAndDisplayAssets(safeAssets, currentApiUrl, currentApiKey, recyclerViewFotos);
+        }
+
+        // 2. Das aktuelle Suchfenster (Archiv, Tresor, Suche, etc.) aktualisieren, falls offen
+        if (recyclerViewSearch != null && recyclerViewSearch.getVisibility() == View.VISIBLE && lastSearchResults != null) {
+            List<ImmichAsset> safeSearchAssets = new ArrayList<>();
+            for (ImmichAsset a : lastSearchResults) {
+                String d = a.description;
+                if (d == null && a.exifInfo != null) d = a.exifInfo.description;
+                if (d == null && a.exifInfo != null) d = a.exifInfo.imageDescription;
+                boolean isLocked = (d != null && d.toLowerCase().contains("#locked"));
+                boolean isArchived = (a.isArchived != null && a.isArchived);
+                boolean isFav = (a.isFavorite != null && a.isFavorite);
+
+                if (lastSearchMode == 1) { // 1 = Archiv
+                    if (isArchived && !isLocked) safeSearchAssets.add(a);
+                } else if (lastSearchMode == 2) { // 2 = Tresor
+                    if (isLocked) safeSearchAssets.add(a);
+                } else if (lastSearchMode == 0) { // 0 = Favoriten
+                    if (isFav && !isLocked && !isArchived) safeSearchAssets.add(a);
+                } else { // 3 oder 4 = Normale & Smart Suche
+                    if (!isLocked && !isArchived) safeSearchAssets.add(a);
+                }
+            }
+
+            if (lastSearchMode == 4) {
+                processAndDisplaySmartSearchResults(safeSearchAssets, currentApiUrl, currentApiKey, recyclerViewSearch);
+            } else {
+                processAndDisplayAssets(safeSearchAssets, currentApiUrl, currentApiKey, recyclerViewSearch);
             }
         }
     }
@@ -409,6 +502,10 @@ public class FotosFragment extends Fragment {
                         if (getActivity() != null) {
                             getActivity().runOnUiThread(() -> {
                                 extractMetadataToCache(finalAssetList);
+
+                                lastSearchMode = 3;
+                                lastSearchResults = new ArrayList<>(finalAssetList);
+
                                 tvSearchLoading.setVisibility(View.GONE);
                                 recyclerViewSearch.setVisibility(View.VISIBLE);
                                 processAndDisplayAssets(finalAssetList, cleanBaseUrl, currentApiKey, recyclerViewSearch);
@@ -535,8 +632,8 @@ public class FotosFragment extends Fragment {
                 new AlertDialog.Builder(getContext())
                         .setTitle("Medientyp suchen")
                         .setItems(types, (dialog, which) -> {
-                            if (which == 0) performCloudMetadataSearch("{\"type\": \"IMAGE\", \"withExif\": true, \"size\": 500}", "Lade Fotos aus der Cloud...");
-                            if (which == 1) performCloudMetadataSearch("{\"type\": \"VIDEO\", \"withExif\": true, \"size\": 500}", "Lade Videos aus der Cloud...");
+                            if (which == 0) performCloudMetadataSearch("{\"type\": \"IMAGE\", \"withExif\": true, \"size\": 1000}", "Lade Fotos aus der Cloud...");
+                            if (which == 1) performCloudMetadataSearch("{\"type\": \"VIDEO\", \"withExif\": true, \"size\": 1000}", "Lade Videos aus der Cloud...");
                         })
                         .setNegativeButton("Abbrechen", null).show();
             });
@@ -549,24 +646,24 @@ public class FotosFragment extends Fragment {
             });
         }
         if (view.findViewById(R.id.btn_search_videos) != null) {
-            view.findViewById(R.id.btn_search_videos).setOnClickListener(v -> performCloudMetadataSearch("{\"type\": \"VIDEO\", \"withExif\": true, \"size\": 500}", "Lade alle Videos aus der Cloud..."));
+            view.findViewById(R.id.btn_search_videos).setOnClickListener(v -> performCloudMetadataSearch("{\"type\": \"VIDEO\", \"withExif\": true, \"size\": 1000}", "Lade alle Videos aus der Cloud..."));
         }
 
-        // --- BUTTONS AUS DER BIBLIOTHEK (HIER ÜBERGEBEN WIR DIE JSON BODY STRINGS) ---
         if (view.findViewById(R.id.btn_search_favorites) != null) {
             view.findViewById(R.id.btn_search_favorites).setOnClickListener(v -> {
-                fetchSpecialAssets("{\"isFavorite\": true, \"withExif\": true}", "Lade deine Cloud-Favoriten...", 0);
+                // Bei der Suche ist das Limit wichtig und "isFavorite" anstatt "visibility"
+                fetchSpecialAssets("{\"isFavorite\": true, \"withExif\": true, \"withArchived\": true, \"size\": 1000}", "Lade deine Cloud-Favoriten...", 0);
             });
         }
 
         if (view.findViewById(R.id.btn_search_archive) != null) {
             view.findViewById(R.id.btn_search_archive).setOnClickListener(v -> {
-                fetchSpecialAssets("{\"isArchived\": true, \"withExif\": true}", "Lade dein Archiv...", 1);
+                fetchSpecialAssets("{\"visibility\":\"archive\",\"withArchived\":true,\"withExif\":true,\"size\":1000}", "Lade dein Archiv...", 1);
             });
         }
 
         if (view.findViewById(R.id.btn_search_locked) != null) {
-            view.findViewById(R.id.btn_search_locked).setOnClickListener(v -> promptForLockedFolder(true));
+            view.findViewById(R.id.btn_search_locked).setOnClickListener(v -> promptForLockedFolder(true, false));
         }
     }
 
@@ -582,44 +679,43 @@ public class FotosFragment extends Fragment {
             try {
                 String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
 
-                // Wir nutzen jetzt den POST Search-Metadata Endpunkt statt den alten GET Endpunkt!
                 URL url = new URL(cleanBaseUrl + "/api/search/metadata");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("x-api-key", currentApiKey);
                 conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 conn.setDoOutput(true);
 
-                // Den JSON-Body aus dem Aufruf mitsenden
-                conn.getOutputStream().write(jsonBody.getBytes());
+                conn.getOutputStream().write(jsonBody.getBytes("UTF-8"));
 
                 int responseCode = conn.getResponseCode();
 
-                if (responseCode == 200 || responseCode == 201) {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    StringBuilder response = new StringBuilder();
+                // >>> FEHLER-STREAM AUSLESEN UND LOGGEN <<<
+                InputStream inputStream = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
+                StringBuilder responseBuilder = new StringBuilder();
+                if (inputStream != null) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
                     String line;
-                    while ((line = reader.readLine()) != null) response.append(line);
+                    while ((line = reader.readLine()) != null) responseBuilder.append(line);
                     reader.close();
+                }
+                String responseText = responseBuilder.toString();
 
-                    JsonElement root = JsonParser.parseString(response.toString());
-                    List<ImmichAsset> parsedList = new ArrayList<>();
+                android.util.Log.d("IMMICH_SEARCH", "--- FETCH SPECIAL ASSETS (MODE " + mode + ") ---");
+                android.util.Log.d("IMMICH_SEARCH", "URL: " + url.toString());
+                android.util.Log.d("IMMICH_SEARCH", "REQUEST: " + jsonBody);
+                android.util.Log.d("IMMICH_SEARCH", "RESPONSE CODE: " + responseCode);
+                android.util.Log.d("IMMICH_SEARCH", "RESPONSE BODY: " + responseText);
 
-                    // Immich wickelt das Ergebnis je nach API-Version leicht anders ab
-                    if (root.isJsonArray()) {
-                        parsedList = new Gson().fromJson(root, new TypeToken<List<ImmichAsset>>(){}.getType());
-                    } else if (root.isJsonObject() && root.getAsJsonObject().has("assets")) {
-                        parsedList = new Gson().fromJson(root.getAsJsonObject().getAsJsonObject("assets").getAsJsonArray("items"), new TypeToken<List<ImmichAsset>>(){}.getType());
-                    }
-
-                    final List<ImmichAsset> finalAssetList = parsedList;
+                if (responseCode == 200 || responseCode == 201) {
+                    JsonElement root = JsonParser.parseString(responseText);
+                    final List<ImmichAsset> finalAssetList = parseAssetsFromJson(root);
 
                     if (getActivity() != null) {
                         getActivity().runOnUiThread(() -> {
                             extractMetadataToCache(finalAssetList);
 
-                            // Dein bewährter lokaler Türsteher:
                             List<ImmichAsset> filteredList = new ArrayList<>();
                             for (ImmichAsset a : finalAssetList) {
                                 String d = a.description;
@@ -631,13 +727,10 @@ public class FotosFragment extends Fragment {
                                 boolean isFav = (a.isFavorite != null && a.isFavorite);
 
                                 if (mode == 1) {
-                                    // Archiv (darf kein Tresor-Bild sein und MUSS archiviert sein)
                                     if (isArchived && !isLocked) filteredList.add(a);
                                 } else if (mode == 2) {
-                                    // Tresor (MUSS ein Tresor-Bild sein!)
                                     if (isLocked) filteredList.add(a);
                                 } else if (mode == 0) {
-                                    // Favoriten (MUSS Favorit sein, darf nicht gesperrt sein)
                                     if (isFav && !isLocked && !isArchived) filteredList.add(a);
                                 }
                             }
@@ -647,16 +740,20 @@ public class FotosFragment extends Fragment {
                                 return;
                             }
 
+                            lastSearchMode = mode;
+                            lastSearchResults = new ArrayList<>(filteredList);
+
                             tvSearchLoading.setVisibility(View.GONE);
                             recyclerViewSearch.setVisibility(View.VISIBLE);
                             processAndDisplayAssets(filteredList, cleanBaseUrl, currentApiKey, recyclerViewSearch);
                         });
                     }
                 } else {
-                    showSearchError("Fehler vom Server (" + responseCode + ")");
+                    showSearchError("Fehler vom Server (" + responseCode + "):\n" + responseText);
                 }
             } catch (Exception e) {
-                showSearchError("Verbindungsfehler zur Cloud.");
+                android.util.Log.e("IMMICH_SEARCH", "Verbindungsfehler", e);
+                showSearchError("Verbindungsfehler zur Cloud: " + e.getMessage());
             }
         });
     }
@@ -1034,7 +1131,7 @@ public class FotosFragment extends Fragment {
         if (!state.isEmpty()) json.addProperty("state", state);
         if (!city.isEmpty()) json.addProperty("city", city);
         json.addProperty("withExif", true);
-        json.addProperty("size", 500);
+        json.addProperty("size", 1000);
 
         performCloudMetadataSearch(json.toString(), "Durchsuche Cloud nach Ort...");
     }
@@ -1079,29 +1176,32 @@ public class FotosFragment extends Fragment {
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("x-api-key", currentApiKey);
                 conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 conn.setDoOutput(true);
 
-                conn.getOutputStream().write(jsonBody.getBytes());
+                conn.getOutputStream().write(jsonBody.getBytes("UTF-8"));
 
                 int responseCode = conn.getResponseCode();
-                if (responseCode == 200 || responseCode == 201) {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    StringBuilder response = new StringBuilder();
+
+                InputStream inputStream = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
+                StringBuilder responseBuilder = new StringBuilder();
+                if (inputStream != null) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
                     String line;
-                    while ((line = reader.readLine()) != null) response.append(line);
+                    while ((line = reader.readLine()) != null) responseBuilder.append(line);
                     reader.close();
+                }
+                String responseText = responseBuilder.toString();
 
-                    JsonElement jsonElement = JsonParser.parseString(response.toString());
+                android.util.Log.d("IMMICH_SEARCH", "--- CLOUD METADATA SEARCH ---");
+                android.util.Log.d("IMMICH_SEARCH", "URL: " + url.toString());
+                android.util.Log.d("IMMICH_SEARCH", "REQUEST: " + jsonBody);
+                android.util.Log.d("IMMICH_SEARCH", "RESPONSE CODE: " + responseCode);
+                android.util.Log.d("IMMICH_SEARCH", "RESPONSE BODY: " + responseText);
 
-                    List<ImmichAsset> parsedList = new ArrayList<>();
-                    if (jsonElement.isJsonArray()) {
-                        parsedList = new Gson().fromJson(jsonElement, new TypeToken<List<ImmichAsset>>(){}.getType());
-                    } else if (jsonElement.isJsonObject() && jsonElement.getAsJsonObject().has("assets")) {
-                        parsedList = new Gson().fromJson(jsonElement.getAsJsonObject().getAsJsonObject("assets").getAsJsonArray("items"), new TypeToken<List<ImmichAsset>>(){}.getType());
-                    }
-
-                    final List<ImmichAsset> finalAssetList = parsedList;
+                if (responseCode == 200 || responseCode == 201) {
+                    JsonElement jsonElement = JsonParser.parseString(responseText);
+                    final List<ImmichAsset> finalAssetList = parseAssetsFromJson(jsonElement);
 
                     if (finalAssetList != null && !finalAssetList.isEmpty()) {
                         if (getActivity() != null) {
@@ -1128,6 +1228,9 @@ public class FotosFragment extends Fragment {
                                     return;
                                 }
 
+                                lastSearchMode = 3;
+                                lastSearchResults = new ArrayList<>(filteredList);
+
                                 tvSearchLoading.setVisibility(View.GONE);
                                 recyclerViewSearch.setVisibility(View.VISIBLE);
                                 processAndDisplayAssets(filteredList, cleanBaseUrl, currentApiKey, recyclerViewSearch);
@@ -1137,10 +1240,11 @@ public class FotosFragment extends Fragment {
                         showSearchError("Keine Ergebnisse in der Cloud gefunden.");
                     }
                 } else {
-                    showSearchError("Fehler vom Server (" + responseCode + ")");
+                    showSearchError("Fehler vom Server (" + responseCode + "):\n" + responseText);
                 }
             } catch (Exception e) {
-                showSearchError("Verbindungsfehler zur Cloud.");
+                android.util.Log.e("IMMICH_SEARCH", "Verbindungsfehler", e);
+                showSearchError("Verbindungsfehler zur Cloud: " + e.getMessage());
             }
         });
     }
@@ -1188,30 +1292,33 @@ public class FotosFragment extends Fragment {
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("x-api-key", currentApiKey);
                 conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 conn.setDoOutput(true);
 
                 String jsonBody = "{\"query\": \"" + query + "\", \"q\": \"" + query + "\", \"withExif\": true}";
-                conn.getOutputStream().write(jsonBody.getBytes());
+                conn.getOutputStream().write(jsonBody.getBytes("UTF-8"));
 
                 int responseCode = conn.getResponseCode();
-                if (responseCode == 200 || responseCode == 201) {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    StringBuilder response = new StringBuilder();
+
+                InputStream inputStream = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
+                StringBuilder responseBuilder = new StringBuilder();
+                if (inputStream != null) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
                     String line;
-                    while ((line = reader.readLine()) != null) response.append(line);
+                    while ((line = reader.readLine()) != null) responseBuilder.append(line);
                     reader.close();
+                }
+                String responseText = responseBuilder.toString();
 
-                    JsonElement jsonElement = JsonParser.parseString(response.toString());
+                android.util.Log.d("IMMICH_SEARCH", "--- SMART SEARCH ---");
+                android.util.Log.d("IMMICH_SEARCH", "URL: " + url.toString());
+                android.util.Log.d("IMMICH_SEARCH", "REQUEST: " + jsonBody);
+                android.util.Log.d("IMMICH_SEARCH", "RESPONSE CODE: " + responseCode);
+                android.util.Log.d("IMMICH_SEARCH", "RESPONSE BODY: " + responseText);
 
-                    List<ImmichAsset> parsedList = new ArrayList<>();
-                    if (jsonElement.isJsonObject() && jsonElement.getAsJsonObject().has("assets")) {
-                        parsedList = new Gson().fromJson(jsonElement.getAsJsonObject().getAsJsonObject("assets").getAsJsonArray("items"), new TypeToken<List<ImmichAsset>>(){}.getType());
-                    } else if (jsonElement.isJsonArray()) {
-                        parsedList = new Gson().fromJson(jsonElement, new TypeToken<List<ImmichAsset>>(){}.getType());
-                    }
-
-                    final List<ImmichAsset> finalAssetList = parsedList;
+                if (responseCode == 200 || responseCode == 201) {
+                    JsonElement jsonElement = JsonParser.parseString(responseText);
+                    final List<ImmichAsset> finalAssetList = parseAssetsFromJson(jsonElement);
 
                     if (finalAssetList != null && !finalAssetList.isEmpty()) {
                         if (getActivity() != null) {
@@ -1219,6 +1326,10 @@ public class FotosFragment extends Fragment {
                                 extractMetadataToCache(finalAssetList);
                                 tvSearchLoading.setVisibility(View.GONE);
                                 recyclerViewSearch.setVisibility(View.VISIBLE);
+
+                                lastSearchMode = 4; // 4 = Smart Search
+                                lastSearchResults = new ArrayList<>(finalAssetList);
+
                                 processAndDisplaySmartSearchResults(finalAssetList, cleanBaseUrl, currentApiKey, recyclerViewSearch);
                             });
                         }
@@ -1226,10 +1337,11 @@ public class FotosFragment extends Fragment {
                         showSearchError("Die KI hat keine Treffer gefunden.");
                     }
                 } else {
-                    showSearchError("Fehler vom Server (" + responseCode + ")");
+                    showSearchError("Fehler vom Server (" + responseCode + "):\n" + responseText);
                 }
             } catch (Exception e) {
-                showSearchError("Verbindungsfehler zur Cloud.");
+                android.util.Log.e("IMMICH_SEARCH", "Verbindungsfehler", e);
+                showSearchError("Verbindungsfehler zur Cloud: " + e.getMessage());
             }
         });
     }
@@ -1238,6 +1350,11 @@ public class FotosFragment extends Fragment {
         if (getContext() == null || rawListToProcess == null || targetRecyclerView == null) return;
 
         targetRecyclerView.setVisibility(View.VISIBLE);
+
+        Parcelable recyclerViewState = null;
+        if (targetRecyclerView.getLayoutManager() != null) {
+            recyclerViewState = targetRecyclerView.getLayoutManager().onSaveInstanceState();
+        }
 
         List<GalleryItem> relevanceItems = new ArrayList<>();
 
@@ -1258,6 +1375,10 @@ public class FotosFragment extends Fragment {
             openFullscreen(rawListToProcess, index);
         });
         targetRecyclerView.setAdapter(adapter);
+
+        if (recyclerViewState != null) {
+            targetRecyclerView.getLayoutManager().onRestoreInstanceState(recyclerViewState);
+        }
     }
 
     private void fetchPeopleFromImmich() {
@@ -1432,15 +1553,7 @@ public class FotosFragment extends Fragment {
                     reader.close();
 
                     JsonElement jsonElement = JsonParser.parseString(response.toString());
-
-                    List<ImmichAsset> parsedList = new ArrayList<>();
-                    if (jsonElement.isJsonArray()) {
-                        parsedList = new Gson().fromJson(jsonElement, new TypeToken<List<ImmichAsset>>(){}.getType());
-                    } else if (jsonElement.isJsonObject() && jsonElement.getAsJsonObject().has("assets")) {
-                        parsedList = new Gson().fromJson(jsonElement.getAsJsonObject().getAsJsonObject("assets").getAsJsonArray("items"), new TypeToken<List<ImmichAsset>>(){}.getType());
-                    }
-
-                    final List<ImmichAsset> finalAssetList = parsedList;
+                    final List<ImmichAsset> finalAssetList = parseAssetsFromJson(jsonElement);
 
                     if (finalAssetList != null && !finalAssetList.isEmpty()) {
                         if (getActivity() != null) {
@@ -1461,6 +1574,9 @@ public class FotosFragment extends Fragment {
                                     showSearchError("Keine Bilder für " + personName + " gefunden.");
                                     return;
                                 }
+
+                                lastSearchMode = 3;
+                                lastSearchResults = new ArrayList<>(filteredList);
 
                                 tvSearchLoading.setVisibility(View.GONE);
                                 recyclerViewSearch.setVisibility(View.VISIBLE);
@@ -1548,10 +1664,11 @@ public class FotosFragment extends Fragment {
                         Toast.makeText(getContext(), "Wird gelöscht...", Toast.LENGTH_SHORT).show();
 
                         Executors.newSingleThreadExecutor().execute(() -> {
+                            HttpURLConnection conn = null;
                             try {
                                 String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
                                 URL url = new URL(cleanBaseUrl + "/api/asset");
-                                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                                conn = (HttpURLConnection) url.openConnection();
                                 conn.setRequestMethod("DELETE");
                                 conn.setRequestProperty("x-api-key", currentApiKey);
                                 conn.setRequestProperty("Content-Type", "application/json");
@@ -1573,25 +1690,28 @@ public class FotosFragment extends Fragment {
                                     responseCode = conn.getResponseCode();
                                 }
 
+                                InputStream inputStream = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
+                                StringBuilder responseBuilder = new StringBuilder();
+                                if (inputStream != null) {
+                                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
+                                    String line;
+                                    while ((line = reader.readLine()) != null) responseBuilder.append(line);
+                                    reader.close();
+                                }
+                                String responseText = responseBuilder.toString();
+                                android.util.Log.d("IMMICH_DELETE", "RESPONSE CODE: " + responseCode + " | BODY: " + responseText);
+
                                 if (responseCode == 200 || responseCode == 201 || responseCode == 204) {
                                     if (getActivity() != null) {
                                         getActivity().runOnUiThread(() -> {
+
+                                            // Bild wird aus allen lokalen Listen geworfen
                                             globalAssetList.remove(currentViewedAsset);
+                                            if (lastSearchResults != null) lastSearchResults.remove(currentViewedAsset);
 
-                                            // Neu rendern
-                                            List<ImmichAsset> safeAssets = new ArrayList<>();
-                                            for (ImmichAsset a : globalAssetList) {
-                                                boolean isLocked = (a.description != null && a.description.toLowerCase().contains("#locked")) ||
-                                                        (a.exifInfo != null && a.exifInfo.description != null && a.exifInfo.description.toLowerCase().contains("#locked")) ||
-                                                        (a.exifInfo != null && a.exifInfo.imageDescription != null && a.exifInfo.imageDescription.toLowerCase().contains("#locked"));
-                                                boolean isArchived = (a.isArchived != null && a.isArchived);
+                                            // Live-Aktualisierung beider Grids starten!
+                                            refreshVisibleGrids();
 
-                                                if (!isLocked && !isArchived) {
-                                                    safeAssets.add(a);
-                                                }
-                                            }
-
-                                            processAndDisplayAssets(safeAssets, currentApiUrl, currentApiKey, recyclerViewFotos);
                                             closeFullscreen();
                                             Toast.makeText(getContext(), "Erfolgreich gelöscht", Toast.LENGTH_SHORT).show();
                                         });
@@ -1599,132 +1719,18 @@ public class FotosFragment extends Fragment {
                                 } else {
                                     if (getActivity() != null) {
                                         int finalResponseCode = responseCode;
-                                        getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Löschen fehlgeschlagen (" + finalResponseCode + ")", Toast.LENGTH_SHORT).show());
+                                        getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Löschen fehlgeschlagen (" + finalResponseCode + "): " + responseText, Toast.LENGTH_LONG).show());
                                     }
                                 }
                             } catch (Exception e) {
+                                android.util.Log.e("IMMICH_DELETE", "Fehler", e);
                                 if (getActivity() != null) getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Netzwerkfehler beim Löschen", Toast.LENGTH_SHORT).show());
+                            } finally {
+                                if (conn != null) conn.disconnect();
                             }
                         });
                     }).setNegativeButton("Abbrechen", null).show();
         });
-    }
-
-    private void archiveCurrentAsset() {
-        if (currentViewedAsset == null || getContext() == null) return;
-        Toast.makeText(getContext(), "Wird ins Archiv verschoben...", Toast.LENGTH_SHORT).show();
-
-        Executors.newSingleThreadExecutor().execute(() -> {
-            try {
-                String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
-                URL url = new URL(cleanBaseUrl + "/api/asset");
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("PUT");
-                conn.setRequestProperty("x-api-key", currentApiKey);
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setDoOutput(true);
-
-                String json = "{\"ids\": [\"" + currentViewedAsset.id + "\"], \"isArchived\": true}";
-                conn.getOutputStream().write(json.getBytes());
-
-                int responseCode = conn.getResponseCode();
-                if (responseCode == 404 || responseCode == 405) {
-                    url = new URL(cleanBaseUrl + "/api/assets");
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("PUT");
-                    conn.setRequestProperty("x-api-key", currentApiKey);
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setDoOutput(true);
-                    conn.getOutputStream().write(json.getBytes());
-                    responseCode = conn.getResponseCode();
-                }
-
-                if (responseCode == 200 || responseCode == 201 || responseCode == 204) {
-                    if (getActivity() != null) {
-                        getActivity().runOnUiThread(() -> {
-                            globalAssetList.remove(currentViewedAsset);
-
-                            List<ImmichAsset> safeAssets = new ArrayList<>();
-                            for (ImmichAsset a : globalAssetList) {
-                                boolean isLocked = (a.description != null && a.description.toLowerCase().contains("#locked")) ||
-                                        (a.exifInfo != null && a.exifInfo.description != null && a.exifInfo.description.toLowerCase().contains("#locked")) ||
-                                        (a.exifInfo != null && a.exifInfo.imageDescription != null && a.exifInfo.imageDescription.toLowerCase().contains("#locked"));
-                                boolean isArchived = (a.isArchived != null && a.isArchived);
-
-                                if (!isLocked && !isArchived) {
-                                    safeAssets.add(a);
-                                }
-                            }
-
-                            processAndDisplayAssets(safeAssets, currentApiUrl, currentApiKey, recyclerViewFotos);
-                            closeFullscreen();
-                            Toast.makeText(getContext(), "Ab ins Archiv! 🗃️", Toast.LENGTH_SHORT).show();
-                        });
-                    }
-                } else {
-                    if (getActivity() != null) {
-                        int finalResponseCode = responseCode;
-                        getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Archivieren fehlgeschlagen (" + finalResponseCode + ")", Toast.LENGTH_SHORT).show());
-                    }
-                }
-            } catch (Exception e) {
-                if (getActivity() != null) getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Netzwerkfehler", Toast.LENGTH_SHORT).show());
-            }
-        });
-    }
-
-    private void promptForLockedFolder(boolean isViewing) {
-        if (getContext() == null) return;
-        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String savedPin = prefs.getString("locked_folder_pin", "");
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
-        builder.setTitle(savedPin.isEmpty() ? "Tresor einrichten" : "Tresor entsperren");
-        builder.setMessage(savedPin.isEmpty() ? "Lege eine 4-stellige PIN fest, um deine Bilder zu schützen:" : "Bitte gib deine PIN ein:");
-
-        final EditText input = new EditText(getContext());
-        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-        input.setPadding(50, 50, 50, 50);
-        builder.setView(input);
-
-        builder.setPositiveButton("OK", (dialog, which) -> {
-            String enteredPin = input.getText().toString();
-            if (savedPin.isEmpty()) {
-                if (enteredPin.length() >= 4) {
-                    prefs.edit().putString("locked_folder_pin", enteredPin).apply();
-                    Toast.makeText(getContext(), "PIN gespeichert!", Toast.LENGTH_SHORT).show();
-                    if (!isViewing) executeLockAsset();
-                    else {
-                        fetchSpecialAssets("{\"isArchived\": true, \"withExif\": true}", "Tresor wird geöffnet...", 2);
-                    }
-                } else {
-                    Toast.makeText(getContext(), "PIN muss mind. 4 Zeichen haben.", Toast.LENGTH_SHORT).show();
-                }
-            } else {
-                if (enteredPin.equals(savedPin)) {
-                    if (isViewing) {
-                        fetchSpecialAssets("{\"isArchived\": true, \"withExif\": true}", "Tresor wird geöffnet...", 2);
-                    } else {
-                        executeLockAsset();
-                    }
-                } else {
-                    Toast.makeText(getContext(), "Falsche PIN! 🚫", Toast.LENGTH_SHORT).show();
-                }
-            }
-        });
-        builder.setNegativeButton("Abbrechen", null);
-        builder.show();
-    }
-
-    private void executeLockAsset() {
-        if (currentViewedAsset == null) return;
-
-        String newDesc = currentViewedAsset.description != null ? currentViewedAsset.description + " #locked" : "#locked";
-        currentViewedAsset.description = newDesc;
-        saveDescriptionToServer(currentViewedAsset.id, newDesc);
-
-        archiveCurrentAsset();
-        if (getContext() != null) Toast.makeText(getContext(), "Bild wurde sicher im Tresor gesperrt 🔒", Toast.LENGTH_LONG).show();
     }
 
     private void shareCurrentAsset() {
@@ -1874,16 +1880,18 @@ public class FotosFragment extends Fragment {
         optAlbum.setOnClickListener(v -> loadAndShowAlbumsInBottomSheet(dialog, tvTitle, container));
         container.addView(optAlbum);
 
-        TextView optArchiv = createBottomSheetOption("🗃️  Ins Archiv verschieben");
+        boolean isArchived = currentViewedAsset.isArchived != null && currentViewedAsset.isArchived;
+        TextView optArchiv = createBottomSheetOption(isArchived ? "🗃️  Aus Archiv wiederherstellen" : "🗃️  Ins Archiv verschieben");
         optArchiv.setOnClickListener(v -> {
-            archiveCurrentAsset();
+            toggleArchiveStatus();
             dialog.dismiss();
         });
         container.addView(optArchiv);
 
-        TextView optLocked = createBottomSheetOption("🔒  In gesperrten Ordner");
+        boolean isLocked = currentViewedAsset.description != null && currentViewedAsset.description.toLowerCase().contains("#locked");
+        TextView optLocked = createBottomSheetOption(isLocked ? "🔓  Aus Tresor entfernen" : "🔒  In gesperrten Ordner");
         optLocked.setOnClickListener(v -> {
-            promptForLockedFolder(false);
+            promptForLockedFolder(false, isLocked);
             dialog.dismiss();
         });
         container.addView(optLocked);
@@ -2055,6 +2063,165 @@ public class FotosFragment extends Fragment {
         });
     }
 
+    private void toggleArchiveStatus() {
+        if (currentViewedAsset == null) return;
+        boolean isCurrentlyArchived = currentViewedAsset.isArchived != null && currentViewedAsset.isArchived;
+
+        // Sende false für "includeDescription", weil wir hier nur rein archivieren/wiederherstellen wollen
+        setArchiveStatusOnServer(!isCurrentlyArchived, false);
+    }
+
+    /**
+     * Zentraler und 100% zuverlässiger Endpunkt für das Archivieren UND Sperren von Bildern
+     */
+    private void setArchiveStatusOnServer(boolean archiveStatus, boolean includeDescription) {
+        if (currentViewedAsset == null || getContext() == null) return;
+        Toast.makeText(getContext(), archiveStatus ? "Wird ins Archiv verschoben..." : "Wird wiederhergestellt...", Toast.LENGTH_SHORT).show();
+
+        Executors.newSingleThreadExecutor().execute(() -> {
+            HttpURLConnection conn = null;
+            try {
+                String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
+
+                String escapedDesc = currentViewedAsset.description != null ? currentViewedAsset.description.replace("\"", "\\\"").replace("\n", "\\n") : "";
+
+                // Einzel-Asset Update (Der zuverlässigste Weg für Immich!)
+                URL url = new URL(cleanBaseUrl + "/api/assets/" + currentViewedAsset.id);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("PUT");
+                conn.setRequestProperty("x-api-key", currentApiKey);
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
+
+                String visibilityValue = archiveStatus ? "archive" : "timeline";
+                String requestBody;
+                if (includeDescription) {
+                    requestBody = "{\"visibility\":\"" + visibilityValue + "\", \"description\": \"" + escapedDesc + "\"}";
+                } else {
+                    requestBody = "{\"visibility\":\"" + visibilityValue + "\"}";
+                }
+
+                OutputStream os = conn.getOutputStream();
+                os.write(requestBody.getBytes("UTF-8"));
+                os.flush();
+                os.close();
+
+                int responseCode = conn.getResponseCode();
+
+                InputStream inputStream = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
+                StringBuilder responseBuilder = new StringBuilder();
+                if (inputStream != null) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        responseBuilder.append(line);
+                    }
+                    reader.close();
+                }
+                String responseText = responseBuilder.toString();
+                android.util.Log.d("IMMICH_ARCHIVE", "URL: " + url.toString());
+                android.util.Log.d("IMMICH_ARCHIVE", "REQUEST: " + requestBody);
+                android.util.Log.d("IMMICH_ARCHIVE", "RESPONSE CODE: " + responseCode);
+                android.util.Log.d("IMMICH_ARCHIVE", "RESPONSE BODY: " + responseText);
+
+                if (responseCode == 200 || responseCode == 201 || responseCode == 204) {
+                    if (getActivity() != null) {
+                        getActivity().runOnUiThread(() -> {
+                            // Bild lokal aktualisieren
+                            currentViewedAsset.isArchived = archiveStatus;
+
+                            // Live-Aktualisierung beider Grids starten!
+                            refreshVisibleGrids();
+
+                            closeFullscreen();
+                            Toast.makeText(getContext(), archiveStatus ? "Ab ins Archiv! 🗃️" : "Wiederhergestellt! 🖼️", Toast.LENGTH_SHORT).show();
+                        });
+                    }
+                } else {
+                    if (getActivity() != null) {
+                        String finalResponseText = responseText;
+                        getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Aktion fehlgeschlagen (" + responseCode + "): " + finalResponseText, Toast.LENGTH_LONG).show());
+                    }
+                }
+            } catch (Exception e) {
+                android.util.Log.e("IMMICH_ARCHIVE", "Fehler", e);
+                if (getActivity() != null) getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Netzwerkfehler: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+        });
+    }
+
+    private void promptForLockedFolder(boolean isViewing, boolean isUnlocking) {
+        if (getContext() == null) return;
+        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+        String savedPin = prefs.getString("locked_folder_pin", "");
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+        builder.setTitle(savedPin.isEmpty() ? "Tresor einrichten" : "Tresor entsperren");
+        builder.setMessage(savedPin.isEmpty() ? "Lege eine 4-stellige PIN fest, um deine Bilder zu schützen:" : "Bitte gib deine PIN ein:");
+
+        final EditText input = new EditText(getContext());
+        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        input.setPadding(50, 50, 50, 50);
+        builder.setView(input);
+
+        builder.setPositiveButton("OK", (dialog, which) -> {
+            String enteredPin = input.getText().toString();
+            if (savedPin.isEmpty()) {
+                if (enteredPin.length() >= 4) {
+                    prefs.edit().putString("locked_folder_pin", enteredPin).apply();
+                    Toast.makeText(getContext(), "PIN gespeichert!", Toast.LENGTH_SHORT).show();
+                    if (isViewing) {
+                        fetchSpecialAssets("{\"visibility\":\"archive\",\"withArchived\":true,\"withExif\":true,\"size\":1000}", "Tresor wird geöffnet...", 2);
+                    } else {
+                        toggleLockAsset(isUnlocking);
+                    }
+                } else {
+                    Toast.makeText(getContext(), "PIN muss mind. 4 Zeichen haben.", Toast.LENGTH_SHORT).show();
+                }
+            } else {
+                if (enteredPin.equals(savedPin)) {
+                    if (isViewing) {
+                        fetchSpecialAssets("{\"visibility\":\"archive\",\"withArchived\":true,\"withExif\":true,\"size\":1000}", "Tresor wird geöffnet...", 2);
+                    } else {
+                        toggleLockAsset(isUnlocking);
+                    }
+                } else {
+                    Toast.makeText(getContext(), "Falsche PIN! 🚫", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        builder.setNegativeButton("Abbrechen", null);
+        builder.show();
+    }
+
+    private void toggleLockAsset(boolean isUnlocking) {
+        if (currentViewedAsset == null) return;
+
+        if (isUnlocking) {
+            String currentDesc = currentViewedAsset.description != null ? currentViewedAsset.description : "";
+            String newDesc = currentDesc.replace("#locked", "").trim();
+            currentViewedAsset.description = newDesc;
+
+            // setArchiveStatusOnServer übernimmt jetzt das Speichern des #locked Tags synchron
+            setArchiveStatusOnServer(false, true);
+            if (getContext() != null) Toast.makeText(getContext(), "Bild wurde aus dem Tresor befreit 🔓", Toast.LENGTH_LONG).show();
+        } else {
+            String newDesc = currentViewedAsset.description != null ? currentViewedAsset.description + " #locked" : "#locked";
+            currentViewedAsset.description = newDesc;
+
+            // setArchiveStatusOnServer übernimmt jetzt das Speichern des #locked Tags synchron
+            setArchiveStatusOnServer(true, true);
+            if (getContext() != null) Toast.makeText(getContext(), "Bild wurde sicher im Tresor gesperrt 🔒", Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void toggleFavoriteStatus() {
         if (currentViewedAsset == null) return;
 
@@ -2072,34 +2239,46 @@ public class FotosFragment extends Fragment {
         }
         updateFullscreenUI();
 
+        // Wenn man das Bild in der Favoritenansicht entfavorisiert, direkt herausfiltern
+        if (recyclerViewSearch != null && recyclerViewSearch.getVisibility() == View.VISIBLE && lastSearchMode == 0) {
+            refreshVisibleGrids();
+        }
+
         Executors.newSingleThreadExecutor().execute(() -> {
+            HttpURLConnection conn = null;
             try {
                 String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
-                URL url = new URL(cleanBaseUrl + "/api/asset");
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+
+                URL url = new URL(cleanBaseUrl + "/api/assets/" + currentViewedAsset.id);
+                conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("PUT");
                 conn.setRequestProperty("x-api-key", currentApiKey);
-                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 conn.setDoOutput(true);
-                String json = "{\"ids\": [\"" + currentViewedAsset.id + "\"], \"isFavorite\": " + newFavStatus + "}";
-                conn.getOutputStream().write(json.getBytes());
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
+
+                String requestBody = "{\"isFavorite\": " + newFavStatus + "}";
+                OutputStream os = conn.getOutputStream();
+                os.write(requestBody.getBytes("UTF-8"));
+                os.flush();
+                os.close();
 
                 int responseCode = conn.getResponseCode();
-
-                if (responseCode == 404 || responseCode == 405) {
-                    url = new URL(cleanBaseUrl + "/api/assets");
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("PUT");
-                    conn.setRequestProperty("x-api-key", currentApiKey);
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setDoOutput(true);
-                    conn.getOutputStream().write(json.getBytes());
-                    responseCode = conn.getResponseCode();
+                InputStream inputStream = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
+                StringBuilder responseBuilder = new StringBuilder();
+                if (inputStream != null) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
+                    String line;
+                    while ((line = reader.readLine()) != null) responseBuilder.append(line);
+                    reader.close();
                 }
+                String responseText = responseBuilder.toString();
+                android.util.Log.d("IMMICH_FAVORITE", "RESPONSE CODE: " + responseCode + " | BODY: " + responseText);
 
                 if (responseCode != 200 && responseCode != 201 && responseCode != 204) {
                     if (getActivity() != null) {
-                        int finalResponseCode = responseCode;
                         getActivity().runOnUiThread(() -> {
                             if (newFavStatus) {
                                 favoriteAssets.remove(currentViewedAsset.id);
@@ -2109,11 +2288,13 @@ public class FotosFragment extends Fragment {
                                 currentViewedAsset.isFavorite = true;
                             }
                             updateFullscreenUI();
-                            Toast.makeText(getContext(), "Fehler beim Cloud-Sync (" + finalResponseCode + ")", Toast.LENGTH_SHORT).show();
+                            if (recyclerViewSearch != null && recyclerViewSearch.getVisibility() == View.VISIBLE && lastSearchMode == 0) refreshVisibleGrids();
+                            Toast.makeText(getContext(), "Fehler beim Cloud-Sync (" + responseCode + "): " + responseText, Toast.LENGTH_LONG).show();
                         });
                     }
                 }
             } catch (Exception e) {
+                android.util.Log.e("IMMICH_FAVORITE", "Fehler", e);
                 if (getActivity() != null) {
                     getActivity().runOnUiThread(() -> {
                         if (newFavStatus) {
@@ -2124,9 +2305,12 @@ public class FotosFragment extends Fragment {
                             currentViewedAsset.isFavorite = true;
                         }
                         updateFullscreenUI();
-                        Toast.makeText(getContext(), "Netzwerkfehler beim Favorisieren", Toast.LENGTH_SHORT).show();
+                        if (recyclerViewSearch != null && recyclerViewSearch.getVisibility() == View.VISIBLE && lastSearchMode == 0) refreshVisibleGrids();
+                        Toast.makeText(getContext(), "Netzwerkfehler beim Favorisieren: " + e.getMessage(), Toast.LENGTH_LONG).show();
                     });
                 }
+            } finally {
+                if (conn != null) conn.disconnect();
             }
         });
     }
@@ -2169,35 +2353,42 @@ public class FotosFragment extends Fragment {
         if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
 
         Executors.newSingleThreadExecutor().execute(() -> {
+            HttpURLConnection conn = null;
             try {
                 String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
                 URL url = new URL(cleanBaseUrl + "/api/assets/" + assetId);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("PUT");
                 conn.setRequestProperty("x-api-key", currentApiKey);
                 conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 conn.setDoOutput(true);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
 
                 String escapedDesc = description.replace("\"", "\\\"").replace("\n", "\\n");
-                String json = "{\"description\": \"" + escapedDesc + "\"}";
+                String requestBody = "{\"description\": \"" + escapedDesc + "\"}";
 
-                conn.getOutputStream().write(json.getBytes("UTF-8"));
+                OutputStream os = conn.getOutputStream();
+                os.write(requestBody.getBytes("UTF-8"));
+                os.flush();
+                os.close();
 
                 int responseCode = conn.getResponseCode();
-
-                if (responseCode == 404 || responseCode == 405) {
-                    url = new URL(cleanBaseUrl + "/api/asset/" + assetId);
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("PUT");
-                    conn.setRequestProperty("x-api-key", currentApiKey);
-                    conn.setRequestProperty("Accept", "application/json");
-                    conn.setRequestProperty("Content-Type", "application/json");
-                    conn.setDoOutput(true);
-                    conn.getOutputStream().write(json.getBytes("UTF-8"));
-                    responseCode = conn.getResponseCode();
+                InputStream inputStream = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
+                StringBuilder responseBuilder = new StringBuilder();
+                if (inputStream != null) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
+                    String line;
+                    while ((line = reader.readLine()) != null) responseBuilder.append(line);
+                    reader.close();
                 }
-            } catch (Exception e) {}
+                android.util.Log.d("IMMICH_DESC", "RESPONSE CODE: " + responseCode + " | BODY: " + responseBuilder.toString());
+            } catch (Exception e) {
+                android.util.Log.e("IMMICH_DESC", "Fehler beim Speichern der Beschreibung", e);
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
         });
     }
 
@@ -2312,8 +2503,18 @@ public class FotosFragment extends Fragment {
                         fetchedFav = assetObj.get("isFavorite").getAsBoolean();
                     }
 
+                    // Hilfscheck für den Einzel-Download via visibility
+                    boolean fetchedArchived = false;
+                    if (assetObj.has("isArchived") && !assetObj.get("isArchived").isJsonNull()) {
+                        fetchedArchived = assetObj.get("isArchived").getAsBoolean();
+                    } else if (assetObj.has("visibility") && !assetObj.get("visibility").isJsonNull()) {
+                        String vis = assetObj.get("visibility").getAsString();
+                        fetchedArchived = "archive".equalsIgnoreCase(vis);
+                    }
+
                     final String finalDesc = fetchedDesc;
                     final boolean finalFav = fetchedFav;
+                    final boolean finalArchived = fetchedArchived;
 
                     if (getActivity() != null) {
                         getActivity().runOnUiThread(() -> {
@@ -2325,6 +2526,7 @@ public class FotosFragment extends Fragment {
                             if (currentViewedAsset != null && currentViewedAsset.id.equals(assetId)) {
                                 currentViewedAsset.description = finalDesc;
                                 currentViewedAsset.isFavorite = finalFav;
+                                currentViewedAsset.isArchived = finalArchived;
 
                                 updateFullscreenUI();
 
@@ -2463,36 +2665,36 @@ public class FotosFragment extends Fragment {
         if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
 
         Executors.newSingleThreadExecutor().execute(() -> {
+            HttpURLConnection conn = null;
             try {
                 String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
                 URL url = new URL(cleanBaseUrl + "/api/search/metadata");
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("x-api-key", currentApiKey);
                 conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 conn.setDoOutput(true);
 
-                String jsonBody = "{\"isFavorite\": true, \"size\": 5000}";
-                conn.getOutputStream().write(jsonBody.getBytes());
+                String jsonBody = "{\"isFavorite\": true, \"withArchived\": true, \"size\": 1000}";
+                conn.getOutputStream().write(jsonBody.getBytes("UTF-8"));
 
-                if (conn.getResponseCode() == 200 || conn.getResponseCode() == 201) {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    StringBuilder response = new StringBuilder();
+                int responseCode = conn.getResponseCode();
+                InputStream inputStream = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
+                StringBuilder responseBuilder = new StringBuilder();
+                if (inputStream != null) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
                     String line;
-                    while ((line = reader.readLine()) != null) response.append(line);
+                    while ((line = reader.readLine()) != null) responseBuilder.append(line);
                     reader.close();
+                }
+                String responseText = responseBuilder.toString();
+                android.util.Log.d("IMMICH_SEARCH", "--- SYNC FAVS ---");
+                android.util.Log.d("IMMICH_SEARCH", "RESPONSE CODE: " + responseCode + " | BODY: " + responseText);
 
-                    JsonElement jsonElement = JsonParser.parseString(response.toString());
-                    List<ImmichAsset> favs = new ArrayList<>();
-
-                    if (jsonElement.isJsonArray()) {
-                        favs = new Gson().fromJson(jsonElement, new TypeToken<List<ImmichAsset>>(){}.getType());
-                    } else if (jsonElement.isJsonObject() && jsonElement.getAsJsonObject().has("assets")) {
-                        favs = new Gson().fromJson(jsonElement.getAsJsonObject().getAsJsonObject("assets").getAsJsonArray("items"), new TypeToken<List<ImmichAsset>>(){}.getType());
-                    }
-
-                    final List<ImmichAsset> finalFavs = favs;
+                if (responseCode == 200 || responseCode == 201) {
+                    JsonElement jsonElement = JsonParser.parseString(responseText);
+                    final List<ImmichAsset> finalFavs = parseAssetsFromJson(jsonElement);
 
                     if (finalFavs != null && getActivity() != null) {
                         getActivity().runOnUiThread(() -> {
@@ -2503,7 +2705,11 @@ public class FotosFragment extends Fragment {
                         });
                     }
                 }
-            } catch (Exception e) {}
+            } catch (Exception e) {
+                android.util.Log.e("IMMICH_SEARCH", "Fehler bei syncFavs", e);
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
         });
     }
 
@@ -2517,39 +2723,38 @@ public class FotosFragment extends Fragment {
         }
 
         Executors.newSingleThreadExecutor().execute(() -> {
+            HttpURLConnection conn = null;
             try {
                 String cleanBaseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
                 URL url = new URL(cleanBaseUrl + "/api/search/metadata");
 
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("x-api-key", apiKey);
                 conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 conn.setDoOutput(true);
 
                 String jsonBody = "{\"size\": " + PAGE_SIZE + ", \"page\": " + page + ", \"withExif\": true}";
-                conn.getOutputStream().write(jsonBody.getBytes());
+                conn.getOutputStream().write(jsonBody.getBytes("UTF-8"));
 
                 int responseCode = conn.getResponseCode();
 
-                if (responseCode == 200 || responseCode == 201) {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    StringBuilder response = new StringBuilder();
+                InputStream inputStream = (responseCode >= 200 && responseCode < 300) ? conn.getInputStream() : conn.getErrorStream();
+                StringBuilder responseBuilder = new StringBuilder();
+                if (inputStream != null) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
                     String line;
-                    while ((line = reader.readLine()) != null) response.append(line);
+                    while ((line = reader.readLine()) != null) responseBuilder.append(line);
                     reader.close();
+                }
+                String responseText = responseBuilder.toString();
+                android.util.Log.d("IMMICH_SEARCH", "--- FETCH PHOTOS PAGE " + page + " ---");
+                android.util.Log.d("IMMICH_SEARCH", "RESPONSE CODE: " + responseCode);
 
-                    JsonElement jsonElement = JsonParser.parseString(response.toString());
-                    List<ImmichAsset> assetList = new ArrayList<>();
-
-                    if (jsonElement.isJsonArray()) {
-                        assetList = new Gson().fromJson(jsonElement, new TypeToken<List<ImmichAsset>>(){}.getType());
-                    } else if (jsonElement.isJsonObject() && jsonElement.getAsJsonObject().has("assets")) {
-                        assetList = new Gson().fromJson(jsonElement.getAsJsonObject().getAsJsonObject("assets").getAsJsonArray("items"), new TypeToken<List<ImmichAsset>>(){}.getType());
-                    }
-
-                    final List<ImmichAsset> finalAssetList = assetList;
+                if (responseCode == 200 || responseCode == 201) {
+                    JsonElement jsonElement = JsonParser.parseString(responseText);
+                    final List<ImmichAsset> finalAssetList = parseAssetsFromJson(jsonElement);
 
                     if (finalAssetList != null) {
                         if (finalAssetList.size() < PAGE_SIZE) isLastPage = true;
@@ -2585,11 +2790,13 @@ public class FotosFragment extends Fragment {
                     }
                 } else {
                     isLoading = false;
-                    if (page == 1) showErrorOnUI("Fehler vom Server (" + responseCode + ")");
+                    if (page == 1) showErrorOnUI("Fehler vom Server (" + responseCode + "):\n" + responseText);
                 }
             } catch (Exception e) {
                 isLoading = false;
-                if (page == 1) showErrorOnUI("Verbindungsfehler.");
+                if (page == 1) showErrorOnUI("Verbindungsfehler: " + e.getMessage());
+            } finally {
+                if (conn != null) conn.disconnect();
             }
         });
     }
