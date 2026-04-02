@@ -10,23 +10,62 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- Custom Top Tab Bar -->
-        <LinearLayout
+        <!-- Custom Top Tab Bar & Top Selection Bar -->
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingHorizontal="8dp"
-            android:paddingTop="16dp"
-            android:paddingBottom="8dp"
-            android:gravity="center"
-            android:background="#FFFFFF"
             android:elevation="4dp">
 
-            <TextView android:id="@+id/tab_fotos" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Fotos" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
-            <TextView android:id="@+id/tab_suche" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Suche" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
-            <TextView android:id="@+id/tab_alben" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Alben" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
-            <TextView android:id="@+id/tab_bibliothek" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Bibliothek" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
-        </LinearLayout>
+            <LinearLayout
+                android:id="@+id/layout_top_tabs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingHorizontal="8dp"
+                android:paddingTop="16dp"
+                android:paddingBottom="8dp"
+                android:gravity="center"
+                android:background="#FFFFFF">
+
+                <TextView android:id="@+id/tab_fotos" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Fotos" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
+                <TextView android:id="@+id/tab_suche" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Suche" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
+                <TextView android:id="@+id/tab_alben" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Alben" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
+                <TextView android:id="@+id/tab_bibliothek" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Bibliothek" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
+            </LinearLayout>
+
+            <!-- Obere Auswahl-Leiste (Nur noch Schließen & Anzahl) -->
+            <LinearLayout
+                android:id="@+id/layout_selection_bar"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="16dp"
+                android:background="#8CA8B3"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/btn_close_selection"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="✕"
+                    android:textSize="22sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFFFFF"
+                    android:padding="8dp" />
+
+                <TextView
+                    android:id="@+id/tv_selection_count"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="1 ausgewählt"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFFFFF"
+                    android:layout_marginStart="16dp" />
+            </LinearLayout>
+        </FrameLayout>
 
         <FrameLayout
             android:layout_width="match_parent"
@@ -75,7 +114,6 @@
                         android:textColor="#333333"
                         android:textColorHint="#888888" />
 
-                    <!-- Hier landen die Suchergebnisse -->
                     <TextView
                         android:id="@+id/tv_search_loading"
                         android:layout_width="match_parent"
@@ -93,7 +131,7 @@
                         android:nestedScrollingEnabled="false"
                         android:visibility="gone" />
 
-                    <!-- Die Schnellauswahl für die Suche -->
+                    <!-- Schnellauswahl Suche -->
                     <LinearLayout
                         android:id="@+id/layout_search_categories"
                         android:layout_width="match_parent"
@@ -103,88 +141,35 @@
                         android:orientation="horizontal"
                         android:weightSum="4">
 
-                        <!-- Personen Button -->
-                        <LinearLayout
-                            android:id="@+id/btn_search_personen"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:gravity="center"
-                            android:orientation="vertical">
-                            <com.google.android.material.card.MaterialCardView
-                                android:layout_width="50dp"
-                                android:layout_height="50dp"
-                                app:cardCornerRadius="25dp"
-                                app:cardElevation="2dp"
-                                app:cardBackgroundColor="#FFFFFF"
-                                app:strokeWidth="0dp">
+                        <LinearLayout android:id="@+id/btn_search_personen" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+                            <com.google.android.material.card.MaterialCardView android:layout_width="50dp" android:layout_height="50dp" app:cardCornerRadius="25dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" app:strokeWidth="0dp">
                                 <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="👤" android:textSize="24sp" />
                             </com.google.android.material.card.MaterialCardView>
                             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Personen" android:textColor="#555555" android:textSize="12sp" android:textStyle="bold" />
                         </LinearLayout>
 
-                        <!-- Ort Button -->
-                        <LinearLayout
-                            android:id="@+id/btn_search_ort"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:gravity="center"
-                            android:orientation="vertical">
-                            <com.google.android.material.card.MaterialCardView
-                                android:layout_width="50dp"
-                                android:layout_height="50dp"
-                                app:cardCornerRadius="25dp"
-                                app:cardElevation="2dp"
-                                app:cardBackgroundColor="#FFFFFF"
-                                app:strokeWidth="0dp">
+                        <LinearLayout android:id="@+id/btn_search_ort" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+                            <com.google.android.material.card.MaterialCardView android:layout_width="50dp" android:layout_height="50dp" app:cardCornerRadius="25dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" app:strokeWidth="0dp">
                                 <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="📍" android:textSize="24sp" />
                             </com.google.android.material.card.MaterialCardView>
                             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Orte" android:textColor="#555555" android:textSize="12sp" android:textStyle="bold" />
                         </LinearLayout>
 
-                        <!-- Datum Button -->
-                        <LinearLayout
-                            android:id="@+id/btn_search_datum"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:gravity="center"
-                            android:orientation="vertical">
-                            <com.google.android.material.card.MaterialCardView
-                                android:layout_width="50dp"
-                                android:layout_height="50dp"
-                                app:cardCornerRadius="25dp"
-                                app:cardElevation="2dp"
-                                app:cardBackgroundColor="#FFFFFF"
-                                app:strokeWidth="0dp">
+                        <LinearLayout android:id="@+id/btn_search_datum" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+                            <com.google.android.material.card.MaterialCardView android:layout_width="50dp" android:layout_height="50dp" app:cardCornerRadius="25dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" app:strokeWidth="0dp">
                                 <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="📅" android:textSize="24sp" />
                             </com.google.android.material.card.MaterialCardView>
                             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Datum" android:textColor="#555555" android:textSize="12sp" android:textStyle="bold" />
                         </LinearLayout>
 
-                        <!-- Medientyp Button -->
-                        <LinearLayout
-                            android:id="@+id/btn_search_medientyp"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:gravity="center"
-                            android:orientation="vertical">
-                            <com.google.android.material.card.MaterialCardView
-                                android:layout_width="50dp"
-                                android:layout_height="50dp"
-                                app:cardCornerRadius="25dp"
-                                app:cardElevation="2dp"
-                                app:cardBackgroundColor="#FFFFFF"
-                                app:strokeWidth="0dp">
+                        <LinearLayout android:id="@+id/btn_search_medientyp" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
+                            <com.google.android.material.card.MaterialCardView android:layout_width="50dp" android:layout_height="50dp" app:cardCornerRadius="25dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" app:strokeWidth="0dp">
                                 <TextView android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="🎞️" android:textSize="24sp" />
                             </com.google.android.material.card.MaterialCardView>
                             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Medien" android:textColor="#555555" android:textSize="12sp" android:textStyle="bold" />
                         </LinearLayout>
                     </LinearLayout>
 
-                    <!-- Weitere Such-Kategorien -->
                     <LinearLayout
                         android:id="@+id/layout_search_bottom_buttons"
                         android:layout_width="match_parent"
@@ -192,61 +177,10 @@
                         android:orientation="vertical"
                         android:layout_marginHorizontal="16dp">
 
-                        <TextView
-                            android:id="@+id/btn_search_recent"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:background="@drawable/bg_pill_selected"
-                            android:backgroundTint="#FFFFFF"
-                            android:padding="16dp"
-                            android:text="🕒  Kürzlich aufgenommen"
-                            android:textColor="#333333"
-                            android:textSize="16sp"
-                            android:textStyle="bold"
-                            android:elevation="2dp"/>
-
-                        <TextView
-                            android:id="@+id/btn_search_videos"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:background="@drawable/bg_pill_selected"
-                            android:backgroundTint="#FFFFFF"
-                            android:padding="16dp"
-                            android:text="🎥  Videos"
-                            android:textColor="#333333"
-                            android:textSize="16sp"
-                            android:textStyle="bold"
-                            android:elevation="2dp"/>
-
-                        <TextView
-                            android:id="@+id/btn_search_kamera"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:background="@drawable/bg_pill_selected"
-                            android:backgroundTint="#FFFFFF"
-                            android:padding="16dp"
-                            android:text="📷  Nach Kamera filtern"
-                            android:textColor="#333333"
-                            android:textSize="16sp"
-                            android:textStyle="bold"
-                            android:elevation="2dp"/>
-
-                        <TextView
-                            android:id="@+id/btn_search_einstellungen"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:background="@drawable/bg_pill_selected"
-                            android:backgroundTint="#FFFFFF"
-                            android:padding="16dp"
-                            android:text="⚙️  Such-Einstellungen"
-                            android:textColor="#333333"
-                            android:textSize="16sp"
-                            android:textStyle="bold"
-                            android:elevation="2dp"/>
+                        <TextView android:id="@+id/btn_search_recent" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#FFFFFF" android:padding="16dp" android:text="🕒  Kürzlich aufgenommen" android:textColor="#333333" android:textSize="16sp" android:textStyle="bold" android:elevation="2dp"/>
+                        <TextView android:id="@+id/btn_search_videos" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#FFFFFF" android:padding="16dp" android:text="🎥  Videos" android:textColor="#333333" android:textSize="16sp" android:textStyle="bold" android:elevation="2dp"/>
+                        <TextView android:id="@+id/btn_search_kamera" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#FFFFFF" android:padding="16dp" android:text="📷  Nach Kamera filtern" android:textColor="#333333" android:textSize="16sp" android:textStyle="bold" android:elevation="2dp"/>
+                        <TextView android:id="@+id/btn_search_einstellungen" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#FFFFFF" android:padding="16dp" android:text="⚙️  Such-Einstellungen" android:textColor="#333333" android:textSize="16sp" android:textStyle="bold" android:elevation="2dp"/>
                     </LinearLayout>
                 </LinearLayout>
             </androidx.core.widget.NestedScrollView>
@@ -259,37 +193,9 @@
                 android:orientation="vertical"
                 android:visibility="gone">
 
-                <EditText
-                    android:id="@+id/et_album_search"
-                    android:layout_width="match_parent"
-                    android:layout_height="50dp"
-                    android:layout_margin="16dp"
-                    android:background="@drawable/bg_pill_selected"
-                    android:backgroundTint="#FFFFFF"
-                    android:elevation="2dp"
-                    android:hint="🔍 Album suchen..."
-                    android:inputType="text"
-                    android:paddingHorizontal="16dp"
-                    android:textColor="#333333"
-                    android:textColorHint="#888888" />
-
-                <TextView
-                    android:id="@+id/tv_albums_loading"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="32dp"
-                    android:text="Lade Alben..."
-                    android:textAlignment="center"
-                    android:textColor="#888888"
-                    android:visibility="gone" />
-
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/recycler_view_albums"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:clipToPadding="false"
-                    android:paddingHorizontal="8dp"
-                    android:paddingBottom="100dp" />
+                <EditText android:id="@+id/et_album_search" android:layout_width="match_parent" android:layout_height="50dp" android:layout_margin="16dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#FFFFFF" android:elevation="2dp" android:hint="🔍 Album suchen..." android:inputType="text" android:paddingHorizontal="16dp" android:textColor="#333333" android:textColorHint="#888888" />
+                <TextView android:id="@+id/tv_albums_loading" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="32dp" android:text="Lade Alben..." android:textAlignment="center" android:textColor="#888888" android:visibility="gone" />
+                <androidx.recyclerview.widget.RecyclerView android:id="@+id/recycler_view_albums" android:layout_width="match_parent" android:layout_height="match_parent" android:clipToPadding="false" android:paddingHorizontal="8dp" android:paddingBottom="100dp" />
             </LinearLayout>
 
             <!-- 4. BIBLIOTHEK -->
@@ -305,55 +211,10 @@
                     android:padding="16dp"
                     android:paddingBottom="100dp">
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Bibliothek"
-                        android:textSize="28sp"
-                        android:textStyle="bold"
-                        android:textColor="#333333"
-                        android:layout_marginBottom="24dp"/>
-
-                    <TextView
-                        android:id="@+id/btn_search_favorites"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="8dp"
-                        android:background="@drawable/bg_pill_selected"
-                        android:backgroundTint="#FFFFFF"
-                        android:padding="16dp"
-                        android:text="❤️  Favoriten"
-                        android:textColor="#333333"
-                        android:textSize="16sp"
-                        android:textStyle="bold"
-                        android:elevation="2dp"/>
-
-                    <TextView
-                        android:id="@+id/btn_search_archive"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="8dp"
-                        android:background="@drawable/bg_pill_selected"
-                        android:backgroundTint="#FFFFFF"
-                        android:padding="16dp"
-                        android:text="🗃️  Archiv"
-                        android:textColor="#333333"
-                        android:textSize="16sp"
-                        android:textStyle="bold"
-                        android:elevation="2dp"/>
-
-                    <TextView
-                        android:id="@+id/btn_search_locked"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:background="@drawable/bg_pill_selected"
-                        android:backgroundTint="#FFFFFF"
-                        android:padding="16dp"
-                        android:text="🔒  Gesperrter Ordner (Tresor)"
-                        android:textColor="#333333"
-                        android:textSize="16sp"
-                        android:textStyle="bold"
-                        android:elevation="2dp"/>
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Bibliothek" android:textSize="28sp" android:textStyle="bold" android:textColor="#333333" android:layout_marginBottom="24dp"/>
+                    <TextView android:id="@+id/btn_search_favorites" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#FFFFFF" android:padding="16dp" android:text="❤️  Favoriten" android:textColor="#333333" android:textSize="16sp" android:textStyle="bold" android:elevation="2dp"/>
+                    <TextView android:id="@+id/btn_search_archive" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#FFFFFF" android:padding="16dp" android:text="🗃️  Archiv" android:textColor="#333333" android:textSize="16sp" android:textStyle="bold" android:elevation="2dp"/>
+                    <TextView android:id="@+id/btn_search_locked" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_pill_selected" android:backgroundTint="#FFFFFF" android:padding="16dp" android:text="🔒  Gesperrter Ordner (Tresor)" android:textColor="#333333" android:textSize="16sp" android:textStyle="bold" android:elevation="2dp"/>
                 </LinearLayout>
             </androidx.core.widget.NestedScrollView>
 
@@ -365,8 +226,26 @@
                 android:text="Lade Bilder..."
                 android:textColor="#888888"
                 android:visibility="gone" />
-
         </FrameLayout>
+    </LinearLayout>
+
+    <!-- NEU: Untere Auswahl-Leiste (Mehrfachauswahl) -->
+    <LinearLayout
+        android:id="@+id/layout_selection_bottom_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:padding="16dp"
+        android:background="#FFFFFF"
+        android:elevation="8dp"
+        android:visibility="gone">
+
+        <ImageView android:id="@+id/btn_selection_share" android:layout_width="24dp" android:layout_height="24dp" android:src="@android:drawable/ic_menu_share" app:tint="#555555" android:layout_weight="1"/>
+        <!-- Edit macht bei mehreren Bildern auf einmal keinen Sinn, daher lassen wir es im Multi-Select weg! -->
+        <ImageView android:id="@+id/btn_selection_add_to" android:layout_width="24dp" android:layout_height="24dp" android:src="@android:drawable/ic_menu_add" app:tint="#555555" android:layout_weight="1"/>
+        <ImageView android:id="@+id/btn_selection_delete" android:layout_width="24dp" android:layout_height="24dp" android:src="@android:drawable/ic_menu_delete" app:tint="#555555" android:layout_weight="1"/>
     </LinearLayout>
 
     <!-- Fullscreen Overlay -->
@@ -403,20 +282,8 @@
                 android:padding="8dp"
                 android:layout_weight="1" />
 
-            <ImageView
-                android:id="@+id/btn_favorite"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:src="@android:drawable/btn_star"
-                app:tint="#FFFFFF"
-                android:layout_marginEnd="16dp" />
-
-            <ImageView
-                android:id="@+id/btn_more_options"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:src="@android:drawable/ic_menu_more"
-                app:tint="#FFFFFF" />
+            <ImageView android:id="@+id/btn_favorite" android:layout_width="28dp" android:layout_height="28dp" android:src="@android:drawable/btn_star" app:tint="#FFFFFF" android:layout_marginEnd="16dp" />
+            <ImageView android:id="@+id/btn_more_options" android:layout_width="28dp" android:layout_height="28dp" android:src="@android:drawable/ic_menu_more" app:tint="#FFFFFF" />
         </LinearLayout>
 
         <!-- Unten: Kleines Menü zum Hochwischen -->

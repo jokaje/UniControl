@@ -1,6 +1,7 @@
 package com.example.unicontrol.adapters;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -17,7 +18,10 @@ import com.example.unicontrol.R;
 import com.example.unicontrol.models.GalleryItem;
 import com.example.unicontrol.models.ImmichAsset;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
@@ -25,18 +29,59 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
         void onFotoClick(ImmichAsset asset);
     }
 
+    public interface OnSelectionListener {
+        void onSelectionChanged(int selectedCount);
+    }
+
     private final Context context;
     private final List<GalleryItem> items;
     private final String baseUrl;
     private final String apiKey;
     private final OnItemClickListener listener;
+    private final OnSelectionListener selectionListener;
 
-    public FotosAdapter(Context context, List<GalleryItem> items, String baseUrl, String apiKey, OnItemClickListener listener) {
+    private boolean isSelectionMode = false;
+    private final Set<ImmichAsset> selectedAssets = new HashSet<>();
+
+    public FotosAdapter(Context context, List<GalleryItem> items, String baseUrl, String apiKey, OnItemClickListener listener, OnSelectionListener selectionListener) {
         this.context = context;
         this.items = items;
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.apiKey = apiKey;
         this.listener = listener;
+        this.selectionListener = selectionListener;
+    }
+
+    public void clearSelection() {
+        selectedAssets.clear();
+        isSelectionMode = false;
+        notifyDataSetChanged();
+        if (selectionListener != null) {
+            selectionListener.onSelectionChanged(0);
+        }
+    }
+
+    public List<ImmichAsset> getSelectedAssets() {
+        return new ArrayList<>(selectedAssets);
+    }
+
+    private void toggleSelection(int position, ImmichAsset asset) {
+        if (selectedAssets.contains(asset)) {
+            selectedAssets.remove(asset);
+        } else {
+            selectedAssets.add(asset);
+        }
+
+        if (selectedAssets.isEmpty()) {
+            isSelectionMode = false;
+            notifyDataSetChanged();
+        } else {
+            notifyItemChanged(position);
+        }
+
+        if (selectionListener != null) {
+            selectionListener.onSelectionChanged(selectedAssets.size());
+        }
     }
 
     @Override
@@ -82,17 +127,45 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
                     .centerCrop()
                     .into(fotoHolder.imageView);
 
-            // NEU: Erkennen, ob es ein Video ist, und Play-Symbol einblenden!
             if (asset.type != null && asset.type.equals("VIDEO")) {
                 fotoHolder.iconPlay.setVisibility(View.VISIBLE);
             } else {
                 fotoHolder.iconPlay.setVisibility(View.GONE);
             }
 
+            boolean isSelected = selectedAssets.contains(asset);
+
+            if (isSelected) {
+                fotoHolder.imageView.setScaleX(0.85f);
+                fotoHolder.imageView.setScaleY(0.85f);
+                fotoHolder.itemView.setBackgroundColor(Color.parseColor("#E0F0FF"));
+
+                if (fotoHolder.iconSelected != null) fotoHolder.iconSelected.setVisibility(View.VISIBLE);
+            } else {
+                fotoHolder.imageView.setScaleX(1.0f);
+                fotoHolder.imageView.setScaleY(1.0f);
+                fotoHolder.itemView.setBackgroundColor(Color.TRANSPARENT);
+
+                if (fotoHolder.iconSelected != null) fotoHolder.iconSelected.setVisibility(View.GONE);
+            }
+
             fotoHolder.itemView.setOnClickListener(v -> {
-                if (listener != null) {
-                    listener.onFotoClick(asset);
+                if (isSelectionMode) {
+                    toggleSelection(position, asset);
+                } else {
+                    if (listener != null) {
+                        listener.onFotoClick(asset);
+                    }
                 }
+            });
+
+            fotoHolder.itemView.setOnLongClickListener(v -> {
+                if (!isSelectionMode) {
+                    isSelectionMode = true;
+                    toggleSelection(position, asset);
+                    return true;
+                }
+                return false;
             });
         }
     }
@@ -120,11 +193,14 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
 
     public static class FotoViewHolder extends RecyclerView.ViewHolder {
         ImageView imageView;
-        ImageView iconPlay; // NEU
+        ImageView iconPlay;
+        TextView iconSelected; // KORRIGIERT: Ist jetzt ein TextView, passend zur XML!
+
         public FotoViewHolder(@NonNull View itemView) {
             super(itemView);
             imageView = itemView.findViewById(R.id.image_view_foto);
-            iconPlay = itemView.findViewById(R.id.icon_play_video); // NEU
+            iconPlay = itemView.findViewById(R.id.icon_play_video);
+            iconSelected = itemView.findViewById(R.id.icon_selected);
         }
     }
 }
