@@ -136,6 +136,9 @@ public class FotosFragment extends Fragment {
     private String currentApiKey = "";
     private List<ImmichAsset> globalAssetList = new ArrayList<>();
 
+    // NEU: Robuste Status-Variable für das aktuell sichtbare Tab (Samsung Fix)
+    private String activeTab = "Fotos";
+
     private List<ImmichAsset> lastSearchResults = new ArrayList<>();
     private int lastSearchMode = -1; // 0=Fav, 1=Archiv, 2=Tresor, 3=Normal, 4=Smart
 
@@ -194,7 +197,6 @@ public class FotosFragment extends Fragment {
             });
         }
 
-        // --- NEU: Auswahl-Leisten verbinden (Oben & Unten) ---
         layoutSelectionBar = view.findViewById(R.id.layout_selection_bar);
         layoutSelectionBottomBar = view.findViewById(R.id.layout_selection_bottom_bar);
         tvSelectionCount = view.findViewById(R.id.tv_selection_count);
@@ -208,7 +210,6 @@ public class FotosFragment extends Fragment {
             if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
         });
 
-        // Buttons verknüpfen
         if (btnSelectionShare != null) btnSelectionShare.setOnClickListener(v -> {
             if (currentFotosAdapter != null) shareAssets(currentFotosAdapter.getSelectedAssets());
         });
@@ -278,7 +279,6 @@ public class FotosFragment extends Fragment {
         loadAppropriateUrlAndKey();
     }
 
-    // --- NEU: ZENTRALE TEILEN-FUNKTION (EINZEL & MEHRFACH) ---
     private void shareAssets(List<ImmichAsset> selected) {
         if (selected == null || selected.isEmpty() || getContext() == null) return;
 
@@ -297,7 +297,6 @@ public class FotosFragment extends Fragment {
                 ImmichAsset asset = selected.get(i);
                 final int progress = i + 1;
 
-                // Kurze Info beim Download von vielen Dateien
                 if (getActivity() != null && selected.size() > 3 && progress % 3 == 0) {
                     getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Lade Datei " + progress + " von " + selected.size() + "...", Toast.LENGTH_SHORT).show());
                 }
@@ -310,7 +309,6 @@ public class FotosFragment extends Fragment {
                     String fileExtension = isVideo ? ".mp4" : ".jpg";
                     File fileToShare = new File(sharedImagesDir, "share_" + asset.id + fileExtension);
 
-                    // Nur laden, wenn die Datei nicht von einem vorherigen Teilen noch im Cache liegt
                     if (!fileToShare.exists()) {
                         URL url = new URL(downloadUrl);
                         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -341,7 +339,6 @@ public class FotosFragment extends Fragment {
                 getActivity().runOnUiThread(() -> {
                     Intent shareIntent = new Intent();
 
-                    // Android braucht beim Teilen von 1 vs mehreren Dateien leicht unterschiedliche Befehle
                     if (uriList.size() == 1) {
                         shareIntent.setAction(Intent.ACTION_SEND);
                         shareIntent.putExtra(Intent.EXTRA_STREAM, uriList.get(0));
@@ -350,7 +347,7 @@ public class FotosFragment extends Fragment {
                         shareIntent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uriList);
                     }
 
-                    String mimeType = "*/*"; // Gemischt
+                    String mimeType = "*/*";
                     if (finalHasImage && !finalHasVideo) mimeType = "image/*";
                     if (finalHasVideo && !finalHasImage) mimeType = "video/*";
 
@@ -358,7 +355,6 @@ public class FotosFragment extends Fragment {
                     shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                     startActivity(Intent.createChooser(shareIntent, "Teilen über..."));
 
-                    // Auswahl nach dem Teilen zurücksetzen
                     if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
                 });
             } else {
@@ -367,7 +363,6 @@ public class FotosFragment extends Fragment {
         });
     }
 
-    // --- NEU: ZENTRALE LÖSCHFUNKTION (EINZEL & MEHRFACH) ---
     private void deleteAssets(List<ImmichAsset> selected) {
         if (selected == null || selected.isEmpty() || getContext() == null) return;
 
@@ -836,10 +831,11 @@ public class FotosFragment extends Fragment {
                 tvSearchLoading.setVisibility(View.GONE);
                 Toast.makeText(getContext(), msg, Toast.LENGTH_LONG).show();
 
-                if (tabFotos != null && tabFotos.getTypeface() != null && tabFotos.getTypeface().isBold()) selectTab(tabFotos, "Fotos");
-                else if (tabSuche != null && tabSuche.getTypeface() != null && tabSuche.getTypeface().isBold()) selectTab(tabSuche, "Suche");
-                else if (tabAlben != null && tabAlben.getTypeface() != null && tabAlben.getTypeface().isBold()) selectTab(tabAlben, "Alben");
-                else if (tabBibliothek != null && tabBibliothek.getTypeface() != null && tabBibliothek.getTypeface().isBold()) selectTab(tabBibliothek, "Bibliothek");
+                // ROBUSTER FIX: Statt isBold() nutzen wir unsere feste Variable
+                if ("Fotos".equals(activeTab)) selectTab(tabFotos, "Fotos");
+                else if ("Suche".equals(activeTab)) selectTab(tabSuche, "Suche");
+                else if ("Alben".equals(activeTab)) selectTab(tabAlben, "Alben");
+                else if ("Bibliothek".equals(activeTab)) selectTab(tabBibliothek, "Bibliothek");
             });
         }
     }
@@ -850,10 +846,11 @@ public class FotosFragment extends Fragment {
                 if (tvSearchLoading != null) tvSearchLoading.setVisibility(View.GONE);
                 Toast.makeText(getContext(), msg, Toast.LENGTH_LONG).show();
 
-                if (tabFotos != null && tabFotos.getTypeface() != null && tabFotos.getTypeface().isBold()) selectTab(tabFotos, "Fotos");
-                else if (tabSuche != null && tabSuche.getTypeface() != null && tabSuche.getTypeface().isBold()) selectTab(tabSuche, "Suche");
-                else if (tabAlben != null && tabAlben.getTypeface() != null && tabAlben.getTypeface().isBold()) selectTab(tabAlben, "Alben");
-                else if (tabBibliothek != null && tabBibliothek.getTypeface() != null && tabBibliothek.getTypeface().isBold()) selectTab(tabBibliothek, "Bibliothek");
+                // ROBUSTER FIX: Statt isBold() nutzen wir unsere feste Variable
+                if ("Fotos".equals(activeTab)) selectTab(tabFotos, "Fotos");
+                else if ("Suche".equals(activeTab)) selectTab(tabSuche, "Suche");
+                else if ("Alben".equals(activeTab)) selectTab(tabAlben, "Alben");
+                else if ("Bibliothek".equals(activeTab)) selectTab(tabBibliothek, "Bibliothek");
             });
         }
     }
@@ -876,6 +873,9 @@ public class FotosFragment extends Fragment {
 
     private void selectTab(TextView selectedTab, String tabName) {
         if (getContext() == null) return;
+
+        // NEU: Speichern des aktiven Tabs für zuverlässige Abfragen
+        activeTab = tabName;
 
         if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
 
@@ -2647,13 +2647,23 @@ public class FotosFragment extends Fragment {
     @Override
     public void onHiddenChanged(boolean hidden) {
         super.onHiddenChanged(hidden);
-        if (!hidden) loadAppropriateUrlAndKey();
+        if (!hidden) {
+            loadAppropriateUrlAndKey();
+            // SAMSUNG FIX: Wir zwingen das Neuladen über die UI-Queue (post), wenn wir im Fotos-Tab sind
+            if (!globalAssetList.isEmpty() && recyclerViewFotos != null && "Fotos".equals(activeTab)) {
+                recyclerViewFotos.post(this::refreshVisibleGrids);
+            }
+        }
     }
 
     @Override
     public void onResume() {
         super.onResume();
         loadAppropriateUrlAndKey();
+        // SAMSUNG FIX: Auch beim Zurückkehren in die App sicher neu zeichnen
+        if (!globalAssetList.isEmpty() && recyclerViewFotos != null && "Fotos".equals(activeTab)) {
+            recyclerViewFotos.post(this::refreshVisibleGrids);
+        }
     }
 
     private void loadAppropriateUrlAndKey() {
@@ -2671,7 +2681,10 @@ public class FotosFragment extends Fragment {
         else if (!localUrl.isEmpty()) targetUrl = formatUrl(localUrl, true);
 
         if (!targetUrl.isEmpty() && !apiKey.isEmpty()) {
-            if (!targetUrl.equals(currentApiUrl) || !apiKey.equals(currentApiKey)) {
+            boolean urlChanged = !targetUrl.equals(currentApiUrl) || !apiKey.equals(currentApiKey);
+            boolean needsData = globalAssetList.isEmpty();
+
+            if (urlChanged || needsData) {
                 currentApiUrl = targetUrl;
                 currentApiKey = apiKey;
                 currentPage = 1;
@@ -2681,6 +2694,9 @@ public class FotosFragment extends Fragment {
                 fetchPhotosFromImmich(currentApiUrl, currentApiKey, currentPage);
 
                 syncFavoritesInBackground();
+                // SAMSUNG FIX: Robuste Prüfung über activeTab statt Visibility/Adapter-Null-Check
+            } else if (recyclerViewFotos != null && "Fotos".equals(activeTab)) {
+                recyclerViewFotos.post(this::refreshVisibleGrids);
             }
         } else {
             if (recyclerViewFotos != null) recyclerViewFotos.setVisibility(View.GONE);
@@ -2804,32 +2820,38 @@ public class FotosFragment extends Fragment {
                         if (getActivity() != null) {
                             getActivity().runOnUiThread(() -> {
                                 extractMetadataToCache(safeAssets);
-                                isLoading = false;
-                                if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
                                 if (tvPlaceholder != null) tvPlaceholder.setVisibility(View.GONE);
 
-                                if (tabFotos != null && tabFotos.getTypeface() != null && tabFotos.getTypeface().isBold()) {
-                                    if (recyclerViewFotos != null) recyclerViewFotos.setVisibility(View.VISIBLE);
+                                // SAMSUNG FIX: Weg mit isBold(), stattdessen sauber über activeTab und UI-Thread queue (post)
+                                if ("Fotos".equals(activeTab)) {
+                                    if (recyclerViewFotos != null) {
+                                        recyclerViewFotos.setVisibility(View.VISIBLE);
+                                        recyclerViewFotos.post(() ->
+                                                processAndDisplayAssets(globalAssetList, cleanBaseUrl, apiKey, recyclerViewFotos)
+                                        );
+                                    }
+                                } else {
+                                    processAndDisplayAssets(globalAssetList, cleanBaseUrl, apiKey, recyclerViewFotos);
                                 }
-
-                                processAndDisplayAssets(globalAssetList, cleanBaseUrl, apiKey, recyclerViewFotos);
                             });
                         }
                     } else {
-                        isLoading = false;
-                        if (getActivity() != null) getActivity().runOnUiThread(() -> { if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false); });
                         if (page == 1) showErrorOnUI("Keine Bilder gefunden.");
                     }
                 } else {
-                    isLoading = false;
-                    if (getActivity() != null) getActivity().runOnUiThread(() -> { if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false); });
                     if (page == 1) showErrorOnUI("Fehler vom Server (" + responseCode + "):\n" + responseText);
                 }
             } catch (Exception e) {
-                isLoading = false;
-                if (getActivity() != null) getActivity().runOnUiThread(() -> { if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false); });
                 if (page == 1) showErrorOnUI("Verbindungsfehler: " + e.getMessage());
             } finally {
+                // SAMSUNG BUGFIX: isLoading IMMER zuverlässig im Hintergrund-Thread zurücksetzen,
+                // damit die App nicht in einer Endlosschleife hängt, falls das Tab gerade versteckt ist!
+                isLoading = false;
+                if (getActivity() != null) {
+                    getActivity().runOnUiThread(() -> {
+                        if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
+                    });
+                }
                 if (conn != null) conn.disconnect();
             }
         });
@@ -2878,7 +2900,6 @@ public class FotosFragment extends Fragment {
             groupedItems.add(new GalleryItem(GalleryItem.TYPE_PHOTO, "", asset));
         }
 
-        // --- NEU: ADAPTER-AUFRUF MIT CALLBACK FÜR MULTI-SELECT ---
         currentFotosAdapter = new FotosAdapter(getContext(), groupedItems, baseUrl, apiKey,
                 clickedAsset -> {
                     int index = sortedAssets.indexOf(clickedAsset);

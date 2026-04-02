@@ -50,6 +50,10 @@ public class MainActivity extends AppCompatActivity {
 
     private ObjectAnimator uploadAnimator;
 
+    // NEU: Getrennte Status-Tracker für die Samsung-Optimierung
+    private boolean isManualBackupRunning = false;
+    private boolean isAutoBackupRunning = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -137,38 +141,38 @@ public class MainActivity extends AppCompatActivity {
             splashOverlay.setVisibility(View.GONE);
         }
 
-        // --- NEU: Beobachter für den Hintergrund-Upload ---
-
-        // Beobachtet das manuelle Backup
+        // --- REPARIERT FÜR SAMSUNG: Getrennte, saubere Beobachter ---
         WorkManager.getInstance(this).getWorkInfosForUniqueWorkLiveData("ImmichManualBackup")
                 .observe(this, workInfos -> {
-                    boolean isRunning = false;
+                    isManualBackupRunning = false;
                     for (WorkInfo workInfo : workInfos) {
-                        if (workInfo.getState() == WorkInfo.State.RUNNING ||
-                                workInfo.getState() == WorkInfo.State.ENQUEUED) {
-                            isRunning = true;
+                        // Wir ignorieren ENQUEUED komplett, da Samsung Jobs oft stundenlang parkt
+                        if (workInfo.getState() == WorkInfo.State.RUNNING) {
+                            isManualBackupRunning = true;
                             break;
                         }
                     }
-                    setUploadAnimation(isRunning);
+                    updateAnimationState();
                 });
 
-        // Beobachtet das automatische Nacht-Backup
         WorkManager.getInstance(this).getWorkInfosForUniqueWorkLiveData("ImmichAutoBackup")
                 .observe(this, workInfos -> {
-                    boolean isRunning = false;
+                    isAutoBackupRunning = false;
                     for (WorkInfo workInfo : workInfos) {
-                        // ENQUEUED ignorieren wir hier, da das Auto-Backup ja meistens 24h lang auf "Enqueued" (Wartend) steht
                         if (workInfo.getState() == WorkInfo.State.RUNNING) {
-                            isRunning = true;
+                            isAutoBackupRunning = true;
                             break;
                         }
                     }
-                    setUploadAnimation(isRunning);
+                    updateAnimationState();
                 });
     }
 
-    // --- HILFSMETHODE: Sucht rekursiv nach dem ImageView in verschachtelten Layouts ---
+    // Führt die Status beider Worker zusammen, ohne dass sie sich überschreiben
+    private void updateAnimationState() {
+        setUploadAnimation(isManualBackupRunning || isAutoBackupRunning);
+    }
+
     private ImageView findIconView(View view) {
         if (view instanceof ImageView) {
             return (ImageView) view;
@@ -183,7 +187,6 @@ public class MainActivity extends AppCompatActivity {
         return null;
     }
 
-    // --- REPARIERTE DREH-ANIMATION ---
     public void setUploadAnimation(boolean isUploading) {
         runOnUiThread(() -> {
             BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
@@ -191,11 +194,9 @@ public class MainActivity extends AppCompatActivity {
 
             View fotosTab = bottomNav.findViewById(R.id.nav_fotos);
             if (fotosTab != null) {
-                // Nutzt nun unsere Trüffelschwein-Methode, um das Icon 100%ig zu finden!
                 ImageView icon = findIconView(fotosTab);
 
                 if (icon != null) {
-                    // Stellt sicher, dass es sich genau um die eigene Mitte dreht
                     icon.setPivotX(icon.getWidth() / 2f);
                     icon.setPivotY(icon.getHeight() / 2f);
 
@@ -203,15 +204,14 @@ public class MainActivity extends AppCompatActivity {
                         if (uploadAnimator == null || uploadAnimator.getTarget() != icon) {
                             if (uploadAnimator != null) uploadAnimator.cancel();
                             uploadAnimator = ObjectAnimator.ofFloat(icon, "rotation", 0f, 360f);
-                            uploadAnimator.setDuration(1500); // 1,5 Sekunden pro Drehung (sanft)
+                            uploadAnimator.setDuration(1500);
                             uploadAnimator.setRepeatCount(ValueAnimator.INFINITE);
-                            uploadAnimator.setInterpolator(new LinearInterpolator()); // Gleichmäßige Drehung
+                            uploadAnimator.setInterpolator(new LinearInterpolator());
                         }
                         if (!uploadAnimator.isRunning()) uploadAnimator.start();
                     } else {
                         if (uploadAnimator != null) {
                             uploadAnimator.cancel();
-                            // Dreht die Blume wieder weich in die Ausgangsposition zurück
                             icon.animate().rotation(0f).setDuration(300).start();
                         }
                     }
