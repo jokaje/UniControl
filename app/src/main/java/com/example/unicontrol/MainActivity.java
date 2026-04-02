@@ -25,6 +25,8 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
+import androidx.work.WorkInfo;
+import androidx.work.WorkManager;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.example.unicontrol.fragments.EchoFragment;
@@ -134,6 +136,36 @@ public class MainActivity extends AppCompatActivity {
         } else {
             splashOverlay.setVisibility(View.GONE);
         }
+
+        // --- NEU: Beobachter für den Hintergrund-Upload ---
+
+        // Beobachtet das manuelle Backup
+        WorkManager.getInstance(this).getWorkInfosForUniqueWorkLiveData("ImmichManualBackup")
+                .observe(this, workInfos -> {
+                    boolean isRunning = false;
+                    for (WorkInfo workInfo : workInfos) {
+                        if (workInfo.getState() == WorkInfo.State.RUNNING ||
+                                workInfo.getState() == WorkInfo.State.ENQUEUED) {
+                            isRunning = true;
+                            break;
+                        }
+                    }
+                    setUploadAnimation(isRunning);
+                });
+
+        // Beobachtet das automatische Nacht-Backup
+        WorkManager.getInstance(this).getWorkInfosForUniqueWorkLiveData("ImmichAutoBackup")
+                .observe(this, workInfos -> {
+                    boolean isRunning = false;
+                    for (WorkInfo workInfo : workInfos) {
+                        // ENQUEUED ignorieren wir hier, da das Auto-Backup ja meistens 24h lang auf "Enqueued" (Wartend) steht
+                        if (workInfo.getState() == WorkInfo.State.RUNNING) {
+                            isRunning = true;
+                            break;
+                        }
+                    }
+                    setUploadAnimation(isRunning);
+                });
     }
 
     // --- HILFSMETHODE: Sucht rekursiv nach dem ImageView in verschachtelten Layouts ---

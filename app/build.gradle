@@ -43,12 +43,13 @@ dependencies {
 
     // --- NEU FÜR DIE NATIVE FOTO-GALERIE ---
     // Glide für extrem schnelles, flüssiges Laden und Cachen von Bildern
-    implementation 'com.github.bumptech.glide:glide:4.16.0'
-    annotationProcessor 'com.github.bumptech.glide:compiler:4.16.0'
+    implementation libs.glide
+    annotationProcessor libs.compiler
     // Gson, um später die API-Antworten von Immich leicht zu verarbeiten
-    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation libs.gson
     // NEU: PhotoView für stufenlosen Pinch-to-Zoom im Vollbild!
-    implementation 'com.github.chrisbanes:PhotoView:2.3.0'
+    implementation libs.photoview
     // NEU: Android WorkManager für das vollautomatische Hintergrund-Backup
-    implementation 'androidx.work:work-runtime:2.9.0'
+    implementation libs.work.runtime
+    implementation libs.swiperefreshlayout
 }

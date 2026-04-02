@@ -2,7 +2,6 @@ package com.example.unicontrol.fragments;
 
 import android.Manifest;
 import android.app.TimePickerDialog;
-import android.content.ContentUris;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -13,8 +12,6 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -24,7 +21,6 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -33,41 +29,28 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
-// NEU: Wir nutzen jetzt OneTimeWorkRequest statt Periodic für exaktes Timing!
 import androidx.work.Constraints;
+import androidx.work.Data;
 import androidx.work.ExistingWorkPolicy;
 import androidx.work.NetworkType;
 import androidx.work.OneTimeWorkRequest;
 import androidx.work.WorkManager;
 
 import com.bumptech.glide.Glide;
-import com.example.unicontrol.MainActivity;
 import com.example.unicontrol.R;
-import com.example.unicontrol.utils.NetworkUtils;
 import com.example.unicontrol.workers.BackupWorker;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 
-import java.io.File;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLConnection;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 
@@ -98,17 +81,6 @@ public class SettingsFragment extends Fragment {
     public static final String KEY_AUTO_BACKUP_MINUTE = "auto_backup_minute";
 
     private static final int REQUEST_CODE_PERMISSIONS = 1002;
-
-    private static volatile boolean isUploadingGlobal = false;
-    private static int globalUploadTotal = 0;
-    private static int globalUploadCurrent = 0;
-    private static int globalUploadSuccess = 0;
-    private static int lastErrorCode = 0;
-    private static String lastErrorMessage = "";
-
-    private TextView activeTvProgress;
-    private ProgressBar activeProgressBar;
-    private MaterialButton activeBtnSync;
 
     @Nullable
     @Override
@@ -182,12 +154,6 @@ public class SettingsFragment extends Fragment {
         sheetView.setBackgroundTintList(ColorStateList.valueOf(getThemeColor()));
         dialog.setContentView(sheetView);
 
-        dialog.setOnDismissListener(d -> {
-            activeTvProgress = null;
-            activeProgressBar = null;
-            activeBtnSync = null;
-        });
-
         View bottomSheetInternal = dialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
         if (bottomSheetInternal != null) bottomSheetInternal.setBackgroundResource(android.R.color.transparent);
 
@@ -215,7 +181,7 @@ public class SettingsFragment extends Fragment {
                         empty.setGravity(Gravity.CENTER);
                         container.addView(empty);
                     } else {
-                        populateBackupList(container, albums);
+                        populateBackupList(container, albums, dialog);
                     }
                 });
             }
@@ -267,7 +233,6 @@ public class SettingsFragment extends Fragment {
         return resultList;
     }
 
-    // --- NEU: UHRZEIT-BERECHNUNG FÜR DEN EINMAL-BUTLER ---
     private void scheduleAutoBackup(SharedPreferences prefs) {
         if (getContext() == null) return;
 
@@ -285,7 +250,6 @@ public class SettingsFragment extends Fragment {
         dueDate.set(Calendar.MINUTE, minute);
         dueDate.set(Calendar.SECOND, 0);
 
-        // Wenn die Uhrzeit heute schon vorbei ist, planen wir es für morgen
         if (dueDate.before(currentDate)) {
             dueDate.add(Calendar.HOUR_OF_DAY, 24);
         }
@@ -293,11 +257,10 @@ public class SettingsFragment extends Fragment {
         long timeDiff = dueDate.getTimeInMillis() - currentDate.getTimeInMillis();
 
         Constraints constraints = new Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.UNMETERED) // Nur im WLAN
-                .setRequiresBatteryNotLow(true) // Nicht wenn Akku fast leer
+                .setRequiredNetworkType(NetworkType.UNMETERED)
+                .setRequiresBatteryNotLow(true)
                 .build();
 
-        // FIX: Wir nutzen eine OneTimeWorkRequest. Diese läuft punktgenau ab!
         OneTimeWorkRequest backupRequest = new OneTimeWorkRequest.Builder(BackupWorker.class)
                 .setInitialDelay(timeDiff, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .setConstraints(constraints)
@@ -309,7 +272,7 @@ public class SettingsFragment extends Fragment {
                 backupRequest);
     }
 
-    private void populateBackupList(LinearLayout container, List<LocalAlbum> albums) {
+    private void populateBackupList(LinearLayout container, List<LocalAlbum> albums, BottomSheetDialog dialog) {
         if (getContext() == null) return;
         SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         Set<String> selectedBuckets = prefs.getStringSet(KEY_BACKUP_ALBUMS, new HashSet<>());
@@ -403,7 +366,6 @@ public class SettingsFragment extends Fragment {
         separator.setLayoutParams(sepParams);
         container.addView(separator);
 
-
         TextView infoText = new TextView(getContext());
         infoText.setText("Wähle die Ordner aus, die gesichert werden sollen:");
         infoText.setTextColor(Color.parseColor("#666666"));
@@ -467,308 +429,47 @@ public class SettingsFragment extends Fragment {
             container.addView(row);
         }
 
+        // --- DER BEREINIGTE MANUELLE BACKUP BUTTON ---
         LinearLayout uploadLayout = new LinearLayout(getContext());
         uploadLayout.setOrientation(LinearLayout.VERTICAL);
         uploadLayout.setGravity(Gravity.CENTER);
         uploadLayout.setPadding(0, 32, 0, 0);
 
-        activeTvProgress = new TextView(getContext());
-        activeTvProgress.setTextColor(Color.parseColor("#333333"));
-        activeTvProgress.setTypeface(null, Typeface.BOLD);
-
-        activeProgressBar = new ProgressBar(getContext(), null, android.R.attr.progressBarStyleHorizontal);
-        activeProgressBar.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        activeProgressBar.setProgressTintList(ColorStateList.valueOf(Color.parseColor("#8CA8B3")));
-
-        activeBtnSync = new MaterialButton(getContext());
+        MaterialButton activeBtnSync = new MaterialButton(getContext());
+        activeBtnSync.setText("🚀 Back-Up jetzt im Hintergrund starten");
         activeBtnSync.setTextColor(Color.WHITE);
         activeBtnSync.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#8CA8B3")));
         activeBtnSync.setCornerRadius(60);
         activeBtnSync.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        uploadLayout.addView(activeTvProgress);
-        uploadLayout.addView(activeProgressBar);
         uploadLayout.addView(activeBtnSync);
         container.addView(uploadLayout);
 
-        updateUploadUIState();
-
         activeBtnSync.setOnClickListener(v -> {
-            if (isUploadingGlobal) {
-                Toast.makeText(getContext(), "Upload läuft bereits...", Toast.LENGTH_SHORT).show();
-                return;
-            }
             Set<String> toSync = prefs.getStringSet(KEY_BACKUP_ALBUMS, new HashSet<>());
             if (toSync.isEmpty()) {
                 Toast.makeText(getContext(), "Bitte wähle zuerst mindestens einen Ordner aus!", Toast.LENGTH_SHORT).show();
                 return;
             }
 
-            isUploadingGlobal = true;
-            globalUploadCurrent = 0;
-            globalUploadTotal = 0;
-            globalUploadSuccess = 0;
-            lastErrorCode = 0;
-            lastErrorMessage = "";
-            updateUploadUIState();
+            // Wir geben dem BackupWorker mit, dass er MANUELL gestartet wurde (er ignoriert dann den Auto-Schalter)
+            Data inputData = new Data.Builder()
+                    .putBoolean("is_manual", true)
+                    .build();
 
-            if (getActivity() instanceof MainActivity) {
-                ((MainActivity) getActivity()).setUploadAnimation(true);
-            }
+            OneTimeWorkRequest manualBackupRequest = new OneTimeWorkRequest.Builder(BackupWorker.class)
+                    .setInputData(inputData)
+                    .build();
 
-            startImmichUploadSync(toSync);
-        });
-    }
+            // Sende den Job an den Android WorkManager ab
+            WorkManager.getInstance(requireContext()).enqueueUniqueWork(
+                    "ImmichManualBackup",
+                    ExistingWorkPolicy.REPLACE,
+                    manualBackupRequest
+            );
 
-    private void updateUploadUIState() {
-        if (getActivity() == null) return;
-        getActivity().runOnUiThread(() -> {
-            if (activeBtnSync == null || activeTvProgress == null || activeProgressBar == null) return;
-
-            if (isUploadingGlobal) {
-                activeBtnSync.setEnabled(false);
-                activeBtnSync.setText("Wird hochgeladen...");
-                activeTvProgress.setVisibility(View.VISIBLE);
-                activeProgressBar.setVisibility(View.VISIBLE);
-                activeProgressBar.setMax(globalUploadTotal > 0 ? globalUploadTotal : 100);
-                activeProgressBar.setProgress(globalUploadCurrent);
-                activeTvProgress.setText("Sichere Datei " + globalUploadCurrent + " von " + globalUploadTotal + "...");
-            } else {
-                if (globalUploadTotal > 0 && globalUploadCurrent >= globalUploadTotal) {
-                    activeTvProgress.setVisibility(View.VISIBLE);
-                    activeTvProgress.setText("Fertig! " + globalUploadSuccess + " von " + globalUploadTotal + " gesichert.");
-                    activeProgressBar.setVisibility(View.GONE);
-                    activeBtnSync.setEnabled(true);
-                    activeBtnSync.setText("Upload abgeschlossen");
-                } else {
-                    activeTvProgress.setVisibility(View.GONE);
-                    activeProgressBar.setVisibility(View.GONE);
-                    activeBtnSync.setEnabled(true);
-                    activeBtnSync.setText("🚀 Back-Up jetzt starten");
-                }
-            }
-        });
-    }
-
-    private boolean tryUpload(Context context, String uploadUrlStr, String apiKey, String deviceId, UploadItem item) {
-        try {
-            String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
-
-            String fileName = new File(item.path).getName();
-            if (fileName == null || fileName.isEmpty()) fileName = "upload.jpg";
-            fileName = fileName.replace("\"", "");
-
-            String mimeType = URLConnection.guessContentTypeFromName(fileName);
-            if (mimeType == null) mimeType = "application/octet-stream";
-
-            SimpleDateFormat isoFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
-            isoFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
-            String isoDate = isoFormat.format(new Date(item.dateAddedMs));
-
-            URL url = new URL(uploadUrlStr);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setUseCaches(false);
-            conn.setDoOutput(true);
-            conn.setDoInput(true);
-
-            conn.setChunkedStreamingMode(0);
-
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("x-api-key", apiKey);
-            conn.setRequestProperty("Accept", "application/json");
-            conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-
-            OutputStream outputStream = conn.getOutputStream();
-            PrintWriter writer = new PrintWriter(new OutputStreamWriter(outputStream, "UTF-8"), true);
-
-            writer.append("--").append(boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"deviceAssetId\"\r\n\r\n");
-            writer.append(item.deviceAssetId).append("\r\n");
-
-            writer.append("--").append(boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"deviceId\"\r\n\r\n");
-            writer.append(deviceId).append("\r\n");
-
-            writer.append("--").append(boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"fileCreatedAt\"\r\n\r\n");
-            writer.append(isoDate).append("\r\n");
-
-            writer.append("--").append(boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"fileModifiedAt\"\r\n\r\n");
-            writer.append(isoDate).append("\r\n");
-
-            writer.append("--").append(boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"isFavorite\"\r\n\r\n");
-            writer.append("false").append("\r\n");
-
-            writer.append("--").append(boundary).append("\r\n");
-            writer.append("Content-Disposition: form-data; name=\"assetData\"; filename=\"").append(fileName).append("\"\r\n");
-            writer.append("Content-Type: ").append(mimeType).append("\r\n\r\n");
-            writer.flush();
-
-            InputStream inputStream = context.getContentResolver().openInputStream(item.contentUri);
-            if (inputStream == null) return false;
-
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
-            }
-            outputStream.flush();
-            inputStream.close();
-
-            writer.append("\r\n");
-            writer.append("--").append(boundary).append("--\r\n");
-            writer.close();
-
-            int responseCode = conn.getResponseCode();
-            lastErrorCode = responseCode;
-
-            if (responseCode >= 400) {
-                InputStream es = conn.getErrorStream();
-                if (es != null) {
-                    java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(es, "UTF-8"));
-                    StringBuilder errBuilder = new StringBuilder();
-                    String line;
-                    while ((line = br.readLine()) != null) errBuilder.append(line);
-                    es.close();
-
-                    lastErrorMessage = errBuilder.toString();
-                    if (lastErrorMessage.length() > 150) {
-                        lastErrorMessage = lastErrorMessage.substring(0, 150) + "...";
-                    }
-                } else {
-                    lastErrorMessage = "Server hat keine Details geliefert.";
-                }
-            }
-
-            return (responseCode == 200 || responseCode == 201 || responseCode == 409);
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            lastErrorMessage = e.getMessage();
-            return false;
-        }
-    }
-
-    private void startImmichUploadSync(Set<String> bucketIds) {
-        if (getContext() == null) return;
-
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String savedSsid = prefs.getString(KEY_WIFI_SSID, "");
-        String localUrl = prefs.getString(KEY_FOTOS_LOCAL, "");
-        String publicUrl = prefs.getString(KEY_FOTOS_PUBLIC, "");
-        String apiKey = prefs.getString(KEY_FOTOS_API_KEY, "");
-        String deviceId = prefs.getString(KEY_DEVICE_ID, UUID.randomUUID().toString());
-        String currentSsid = NetworkUtils.getCurrentSsid(getContext());
-        String targetUrl = "";
-
-        if (!savedSsid.isEmpty() && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) targetUrl = formatUrl(localUrl, true);
-        else if (!publicUrl.isEmpty()) targetUrl = formatUrl(publicUrl, false);
-        else if (!localUrl.isEmpty()) targetUrl = formatUrl(localUrl, true);
-
-        if (targetUrl.isEmpty() || apiKey.isEmpty()) {
-            if (getActivity() != null) getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Bitte trage erst API-Key und URL in den Einstellungen ein!", Toast.LENGTH_LONG).show());
-            isUploadingGlobal = false;
-            updateUploadUIState();
-            if (getActivity() instanceof MainActivity) ((MainActivity) getActivity()).setUploadAnimation(false);
-            return;
-        }
-
-        final String cleanBaseUrl = targetUrl.endsWith("/") ? targetUrl.substring(0, targetUrl.length() - 1) : targetUrl;
-
-        Executors.newSingleThreadExecutor().execute(() -> {
-            try {
-                List<UploadItem> itemsToUpload = new ArrayList<>();
-                Uri[] uris = { MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI };
-
-                String[] projection = { MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.BUCKET_ID };
-
-                StringBuilder selection = new StringBuilder(MediaStore.MediaColumns.BUCKET_ID + " IN (");
-                String[] selectionArgs = new String[bucketIds.size()];
-                int index = 0;
-                for (String id : bucketIds) {
-                    selection.append("?");
-                    if (index < bucketIds.size() - 1) selection.append(",");
-                    selectionArgs[index] = id;
-                    index++;
-                }
-                selection.append(")");
-
-                for (Uri uri : uris) {
-                    try (Cursor cursor = getContext().getContentResolver().query(uri, projection, selection.toString(), selectionArgs, "DATE_ADDED ASC")) {
-                        if (cursor != null) {
-                            int idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
-                            int dataColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA);
-                            int dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED);
-
-                            while (cursor.moveToNext()) {
-                                UploadItem item = new UploadItem();
-                                item.deviceAssetId = cursor.getString(idColumn);
-                                item.path = cursor.getString(dataColumn);
-                                item.dateAddedMs = cursor.getLong(dateColumn) * 1000L;
-                                item.contentUri = ContentUris.withAppendedId(uri, cursor.getLong(idColumn));
-                                itemsToUpload.add(item);
-                            }
-                        }
-                    }
-                }
-
-                if (itemsToUpload.isEmpty()) {
-                    isUploadingGlobal = false;
-                    if (getActivity() != null) {
-                        getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Ordner sind leer, nichts hochzuladen!", Toast.LENGTH_SHORT).show());
-                        if (getActivity() instanceof MainActivity) ((MainActivity) getActivity()).setUploadAnimation(false);
-                    }
-                    updateUploadUIState();
-                    return;
-                }
-
-                globalUploadTotal = itemsToUpload.size();
-                globalUploadCurrent = 0;
-                globalUploadSuccess = 0;
-                updateUploadUIState();
-
-                for (UploadItem item : itemsToUpload) {
-                    globalUploadCurrent++;
-                    updateUploadUIState();
-
-                    boolean success = tryUpload(getContext(), cleanBaseUrl + "/api/assets", apiKey, deviceId, item);
-
-                    if (success) {
-                        globalUploadSuccess++;
-                    }
-                }
-
-                isUploadingGlobal = false;
-                updateUploadUIState();
-
-                if (getActivity() != null) {
-                    if (getActivity() instanceof MainActivity) ((MainActivity) getActivity()).setUploadAnimation(false);
-                    getActivity().runOnUiThread(() -> {
-
-                        if (globalUploadSuccess == 0 && globalUploadTotal > 0) {
-                            Toast.makeText(getContext(), "Fehler " + lastErrorCode + ":\n" + lastErrorMessage, Toast.LENGTH_LONG).show();
-                        } else {
-                            Toast.makeText(getContext(), "Backup durchgelaufen! 🎉", Toast.LENGTH_LONG).show();
-                        }
-
-                        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                            globalUploadCurrent = 0;
-                            globalUploadTotal = 0;
-                            updateUploadUIState();
-                        }, 4000);
-                    });
-                }
-
-            } catch (Exception e) {
-                isUploadingGlobal = false;
-                updateUploadUIState();
-                if (getActivity() != null) {
-                    if (getActivity() instanceof MainActivity) ((MainActivity) getActivity()).setUploadAnimation(false);
-                    getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Fehler beim Vorbereiten des Backups.", Toast.LENGTH_SHORT).show());
-                }
-            }
+            Toast.makeText(getContext(), "Backup gestartet! Siehe Benachrichtigungsleiste.", Toast.LENGTH_LONG).show();
+            dialog.dismiss(); // Wir schließen das Menü, der Worker übernimmt ab hier!
         });
     }
 
@@ -777,22 +478,6 @@ public class SettingsFragment extends Fragment {
         String name;
         int count;
         String coverImagePath;
-    }
-
-    private static class UploadItem {
-        String deviceAssetId;
-        String path;
-        long dateAddedMs;
-        Uri contentUri;
-    }
-
-    private String formatUrl(String url, boolean isLocal) {
-        String formatted = url.trim();
-        if (formatted.isEmpty()) return "";
-        if (!formatted.startsWith("http://") && !formatted.startsWith("https://")) {
-            formatted = (isLocal ? "http://" : "https://") + formatted;
-        }
-        return formatted;
     }
 
     private void showNetworkSettingsBottomSheet() {

@@ -1,14 +1,22 @@
 package com.example.unicontrol.workers;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.ContentUris;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.MediaStore;
 import android.util.Log;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.core.app.NotificationCompat;
 import androidx.work.ExistingWorkPolicy;
 import androidx.work.OneTimeWorkRequest;
 import androidx.work.WorkManager;
@@ -18,14 +26,17 @@ import androidx.work.WorkerParameters;
 import com.example.unicontrol.fragments.SettingsFragment;
 import com.example.unicontrol.utils.NetworkUtils;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
+import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -37,13 +48,82 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.UUID;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
 public class BackupWorker extends Worker {
+
+    private static final int NOTIFICATION_ID = 4224;
+    private static final String CHANNEL_ID = "unicontrol_backup_channel";
 
     public BackupWorker(@NonNull Context context, @NonNull WorkerParameters workerParams) {
         super(context, workerParams);
     }
 
-    private boolean tryUpload(Context context, String uploadUrlStr, String apiKey, String deviceId, UploadItem item) {
+    private void updateNotification(String progressText) {
+        Context context = getApplicationContext();
+        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "Cloud Backup",
+                    NotificationManager.IMPORTANCE_LOW
+            );
+            manager.createNotificationChannel(channel);
+        }
+
+        Notification notification = new NotificationCompat.Builder(context, CHANNEL_ID)
+                .setContentTitle("UniControl Backup")
+                .setContentText(progressText)
+                .setSmallIcon(android.R.drawable.ic_popup_sync)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .build();
+
+        try {
+            manager.notify(NOTIFICATION_ID, notification);
+        } catch (SecurityException e) {
+            Log.w("UniControlBackup", "Keine Berechtigung für Benachrichtigungen, läuft stumm weiter.");
+        }
+    }
+
+    private void clearNotification() {
+        Context context = getApplicationContext();
+        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager != null) {
+            manager.cancel(NOTIFICATION_ID);
+        }
+    }
+
+    // --- NEU: Berechnet den SHA-1 Checksum für die Immich Vorab-Prüfung ---
+    private String computeSha1(Context context, Uri uri) {
+        try (InputStream is = context.getContentResolver().openInputStream(uri)) {
+            if (is == null) return null;
+            MessageDigest md = MessageDigest.getInstance("SHA-1");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = is.read(buffer)) != -1) {
+                md.update(buffer, 0, read);
+            }
+            byte[] digest = md.digest();
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            Log.e("UniControlBackup", "Checksum fehlgeschlagen für " + uri.toString(), e);
+            return null;
+        }
+    }
+
+    // Lädt die Datei hoch und gibt den HTTP-Code zurück (201 = Neu, 409 = Bereits vorhanden)
+    private int tryUploadReturnCode(Context context, String uploadUrlStr, String apiKey, String deviceId, UploadItem item) {
+        HttpURLConnection conn = null;
         try {
             String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
 
@@ -59,7 +139,7 @@ public class BackupWorker extends Worker {
             String isoDate = isoFormat.format(new Date(item.dateAddedMs));
 
             URL url = new URL(uploadUrlStr);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn = (HttpURLConnection) url.openConnection();
             conn.setUseCaches(false);
             conn.setDoOutput(true);
             conn.setDoInput(true);
@@ -68,6 +148,8 @@ public class BackupWorker extends Worker {
             conn.setRequestProperty("x-api-key", apiKey);
             conn.setRequestProperty("Accept", "application/json");
             conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(60000);
 
             OutputStream outputStream = conn.getOutputStream();
             PrintWriter writer = new PrintWriter(new OutputStreamWriter(outputStream, "UTF-8"), true);
@@ -98,15 +180,15 @@ public class BackupWorker extends Worker {
             writer.flush();
 
             InputStream inputStream = context.getContentResolver().openInputStream(item.contentUri);
-            if (inputStream == null) return false;
-
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
+            if (inputStream != null) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+                outputStream.flush();
+                inputStream.close();
             }
-            outputStream.flush();
-            inputStream.close();
 
             writer.append("\r\n");
             writer.append("--").append(boundary).append("--\r\n");
@@ -123,12 +205,116 @@ public class BackupWorker extends Worker {
                 }
             }
 
-            return (responseCode == 200 || responseCode == 201 || responseCode == 409);
+            return responseCode;
 
         } catch (Exception e) {
             Log.e("UniControlBackup", "Worker Upload Fehler für: " + item.path, e);
-            return false;
+            return -1;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
         }
+    }
+
+    // --- NEU ANGEPASST: Vorab-Check inklusive SHA-1 Checksum! ---
+    private List<UploadItem> filterExistingAssets(String baseUrl, String apiKey, List<UploadItem> allItems) {
+        List<UploadItem> itemsToUpload = new ArrayList<>();
+        int chunkSize = 250; // Kleinerer Chunk, weil JSON mit Checksums größer wird
+
+        for (int i = 0; i < allItems.size(); i += chunkSize) {
+            int end = Math.min(allItems.size(), i + chunkSize);
+            List<UploadItem> chunk = allItems.subList(i, end);
+
+            updateNotification("Server-Abgleich... (" + end + " von " + allItems.size() + ")");
+
+            try {
+                JsonObject root = new JsonObject();
+                JsonArray assetsArray = new JsonArray();
+                for (UploadItem item : chunk) {
+                    JsonObject assetObj = new JsonObject();
+                    assetObj.addProperty("id", item.deviceAssetId);
+                    if (item.checksum != null && !item.checksum.isEmpty()) {
+                        assetObj.addProperty("checksum", item.checksum);
+                    }
+                    assetsArray.add(assetObj);
+                }
+                root.add("assets", assetsArray);
+                String jsonBody = root.toString();
+
+                URL url = new URL(baseUrl + "/api/asset/bulk-upload-check");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("x-api-key", apiKey);
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(15000);
+
+                OutputStream os = conn.getOutputStream();
+                os.write(jsonBody.getBytes("UTF-8"));
+                os.flush();
+                os.close();
+
+                int responseCode = conn.getResponseCode();
+
+                if (responseCode == 404 || responseCode == 405) {
+                    url = new URL(baseUrl + "/api/assets/bulk-upload-check");
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("x-api-key", apiKey);
+                    conn.setRequestProperty("Accept", "application/json");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setDoOutput(true);
+
+                    os = conn.getOutputStream();
+                    os.write(jsonBody.getBytes("UTF-8"));
+                    os.flush();
+                    os.close();
+                    responseCode = conn.getResponseCode();
+                }
+
+                if (responseCode == 200 || responseCode == 201) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                    StringBuilder response = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) response.append(line);
+                    reader.close();
+
+                    JsonObject responseObj = JsonParser.parseString(response.toString()).getAsJsonObject();
+                    if (responseObj.has("results")) {
+                        JsonArray results = responseObj.getAsJsonArray("results");
+                        HashSet<String> acceptedIds = new HashSet<>();
+
+                        for (JsonElement element : results) {
+                            JsonObject resObj = element.getAsJsonObject();
+                            String action = resObj.get("action").getAsString();
+                            // Immich liefert "accept" wenn das Bild hochgeladen werden muss, "reject" wenn es schon existiert
+                            if ("accept".equalsIgnoreCase(action)) {
+                                acceptedIds.add(resObj.get("id").getAsString());
+                            }
+                        }
+
+                        for (UploadItem item : chunk) {
+                            if (acceptedIds.contains(item.deviceAssetId)) {
+                                itemsToUpload.add(item);
+                            }
+                        }
+                    } else {
+                        itemsToUpload.addAll(chunk);
+                    }
+                } else {
+                    Log.e("UniControlBackup", "Pre-check fehlgeschlagen (" + responseCode + "). Fallback.");
+                    itemsToUpload.addAll(chunk);
+                }
+            } catch (Exception e) {
+                Log.e("UniControlBackup", "Ausnahme beim Pre-check.", e);
+                itemsToUpload.addAll(chunk);
+            }
+        }
+
+        return itemsToUpload;
     }
 
     @NonNull
@@ -139,91 +325,157 @@ public class BackupWorker extends Worker {
         Context context = getApplicationContext();
         SharedPreferences prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
 
-        // 1. Prüfen, ob Auto-Backup noch aktiv ist
-        if (!prefs.getBoolean(SettingsFragment.KEY_AUTO_BACKUP_ENABLED, false)) {
+        boolean isManual = getInputData().getBoolean("is_manual", false);
+
+        if (!isManual && !prefs.getBoolean(SettingsFragment.KEY_AUTO_BACKUP_ENABLED, false)) {
             return Result.success();
         }
 
         Set<String> bucketIds = prefs.getStringSet(SettingsFragment.KEY_BACKUP_ALBUMS, new HashSet<>());
         if (bucketIds.isEmpty()) {
+            if (isManual) showToast("Fehler: Keine Alben für das Backup ausgewählt!");
             return Result.success();
         }
 
-        // 2. Netzwerk und URLs checken
-        String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
-        String localUrl = prefs.getString(SettingsFragment.KEY_FOTOS_LOCAL, "");
-        String publicUrl = prefs.getString(SettingsFragment.KEY_FOTOS_PUBLIC, "");
-        String apiKey = prefs.getString(SettingsFragment.KEY_FOTOS_API_KEY, "");
-        String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, UUID.randomUUID().toString());
-        String currentSsid = NetworkUtils.getCurrentSsid(context);
+        try {
+            updateNotification("Bereite Backup vor...");
 
-        String targetUrl = "";
-        if (!savedSsid.isEmpty() && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) {
-            targetUrl = formatUrl(localUrl, true);
-        } else if (!publicUrl.isEmpty()) {
-            targetUrl = formatUrl(publicUrl, false);
-        }
+            String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
+            String localUrl = prefs.getString(SettingsFragment.KEY_FOTOS_LOCAL, "");
+            String publicUrl = prefs.getString(SettingsFragment.KEY_FOTOS_PUBLIC, "");
+            String apiKey = prefs.getString(SettingsFragment.KEY_FOTOS_API_KEY, "");
+            String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, UUID.randomUUID().toString());
+            String currentSsid = NetworkUtils.getCurrentSsid(context);
 
-        if (targetUrl.isEmpty() || apiKey.isEmpty()) {
-            Log.e("UniControlBackup", "Kein Ziel-Server erreichbar.");
-            return Result.retry();
-        }
+            String targetUrl = "";
+            if (!savedSsid.isEmpty() && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) {
+                targetUrl = formatUrl(localUrl, true);
+            } else if (!publicUrl.isEmpty()) {
+                targetUrl = formatUrl(publicUrl, false);
+            } else if (!localUrl.isEmpty()) {
+                targetUrl = formatUrl(localUrl, true);
+            }
 
-        final String cleanBaseUrl = targetUrl.endsWith("/") ? targetUrl.substring(0, targetUrl.length() - 1) : targetUrl;
+            if (targetUrl.isEmpty() || apiKey.isEmpty()) {
+                Log.e("UniControlBackup", "Kein Ziel-Server erreichbar.");
+                if (isManual) showToast("Fehler: Keine Server-Verbindung möglich!");
+                return Result.retry();
+            }
 
-        // 3. Bilder zusammensuchen
-        List<UploadItem> itemsToUpload = new ArrayList<>();
-        Uri[] uris = { MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI };
-        String[] projection = { MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.BUCKET_ID };
+            final String cleanBaseUrl = targetUrl.endsWith("/") ? targetUrl.substring(0, targetUrl.length() - 1) : targetUrl;
 
-        StringBuilder selection = new StringBuilder(MediaStore.MediaColumns.BUCKET_ID + " IN (");
-        String[] selectionArgs = new String[bucketIds.size()];
-        int index = 0;
-        for (String id : bucketIds) {
-            selection.append("?");
-            if (index < bucketIds.size() - 1) selection.append(",");
-            selectionArgs[index] = id;
-            index++;
-        }
-        selection.append(")");
+            // 1. Bilder zusammensuchen
+            List<UploadItem> itemsToUpload = new ArrayList<>();
+            Uri[] uris = { MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI };
+            String[] projection = { MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.BUCKET_ID };
 
-        for (Uri uri : uris) {
-            try (Cursor cursor = context.getContentResolver().query(uri, projection, selection.toString(), selectionArgs, "DATE_ADDED ASC")) {
-                if (cursor != null) {
-                    int idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
-                    int dataColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA);
-                    int dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED);
+            StringBuilder selection = new StringBuilder(MediaStore.MediaColumns.BUCKET_ID + " IN (");
+            String[] selectionArgs = new String[bucketIds.size()];
+            int index = 0;
+            for (String id : bucketIds) {
+                selection.append("?");
+                if (index < bucketIds.size() - 1) selection.append(",");
+                selectionArgs[index] = id;
+                index++;
+            }
+            selection.append(")");
 
-                    while (cursor.moveToNext()) {
-                        UploadItem item = new UploadItem();
-                        item.deviceAssetId = cursor.getString(idColumn);
-                        item.path = cursor.getString(dataColumn);
-                        item.dateAddedMs = cursor.getLong(dateColumn) * 1000L;
-                        item.contentUri = ContentUris.withAppendedId(uri, cursor.getLong(idColumn));
-                        itemsToUpload.add(item);
+            for (Uri uri : uris) {
+                try (Cursor cursor = context.getContentResolver().query(uri, projection, selection.toString(), selectionArgs, "DATE_ADDED ASC")) {
+                    if (cursor != null) {
+                        int idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+                        int dataColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA);
+                        int dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED);
+
+                        while (cursor.moveToNext()) {
+                            UploadItem item = new UploadItem();
+                            item.deviceAssetId = cursor.getString(idColumn);
+                            item.path = cursor.getString(dataColumn);
+                            item.dateAddedMs = cursor.getLong(dateColumn) * 1000L;
+                            item.contentUri = ContentUris.withAppendedId(uri, cursor.getLong(idColumn));
+                            itemsToUpload.add(item);
+                        }
                     }
+                } catch (Exception e) {
+                    Log.e("UniControlBackup", "Fehler beim Scannen der Medien.", e);
                 }
-            } catch (Exception e) {
-                Log.e("UniControlBackup", "Fehler beim Scannen der Medien.", e);
+            }
+
+            if (itemsToUpload.isEmpty()) {
+                if (isManual) showToast("Keine lokalen Bilder in den ausgewählten Alben gefunden!");
+                return Result.success();
+            }
+
+            Log.d("UniControlBackup", "Lokal gefunden: " + itemsToUpload.size() + " Bilder/Videos. Berechne Prüfsummen...");
+
+            // 2. NEU: SHA-1 Checksums berechnen (erforderlich für den Turbo-Modus!)
+            int totalItems = itemsToUpload.size();
+            for (int i = 0; i < totalItems; i++) {
+                UploadItem item = itemsToUpload.get(i);
+
+                // Wir aktualisieren die Benachrichtigung, damit du siehst, dass er rechnet
+                if (i % 25 == 0 || i == totalItems - 1) {
+                    updateNotification("Analysiere Dateien... (" + (i + 1) + " von " + totalItems + ")");
+                }
+
+                item.checksum = computeSha1(context, item.contentUri);
+            }
+
+            // 3. PRE-CHECK: Server fragen, welche Bilder schon da sind (TURBO-MODUS)
+            List<UploadItem> filteredItems = filterExistingAssets(cleanBaseUrl, apiKey, itemsToUpload);
+
+            Log.d("UniControlBackup", "Vorab-Prüfung abgeschlossen. Neue Dateien zum Upload: " + filteredItems.size());
+
+            // 4. Den eigentlichen Upload abarbeiten
+            int totalNewCount = filteredItems.size();
+            int newUploadsCount = 0;
+            int skippedCount = totalItems - totalNewCount; // Alles, was durch den Turbo-Check direkt aussortiert wurde!
+
+            for (int i = 0; i < totalNewCount; i++) {
+                UploadItem item = filteredItems.get(i);
+
+                if (i % 5 == 0 || i == totalNewCount - 1) {
+                    updateNotification("Sichere Bild " + (i + 1) + " von " + totalNewCount + "...");
+                }
+
+                int code = tryUploadReturnCode(context, cleanBaseUrl + "/api/assets", apiKey, deviceId, item);
+
+                if (code == 200 || code == 201) {
+                    newUploadsCount++;
+                } else if (code == 409) {
+                    // Fallback-Zählung, falls der Pre-Check mal etwas verpasst haben sollte
+                    skippedCount++;
+                }
+            }
+
+            Log.d("UniControlBackup", "Hintergrund-Backup Job erfolgreich abgeschlossen!");
+
+            // --- MANUELLES FEEDBACK ---
+            if (isManual) {
+                showToast("Backup beendet!\n" + newUploadsCount + " neu hochgeladen\n" + skippedCount + " übersprungen 🚀");
+            }
+
+            return Result.success();
+
+        } catch (Exception e) {
+            Log.e("UniControlBackup", "Worker abgebrochen", e);
+            if (isManual) showToast("Backup abgebrochen. Bitte WLAN prüfen.");
+            return Result.failure();
+        } finally {
+            clearNotification();
+
+            if (!isManual) {
+                scheduleNextBackup(context, prefs);
             }
         }
-
-        if (itemsToUpload.isEmpty()) return Result.success();
-
-        // 4. Den eigentlichen Upload abarbeiten
-        for (UploadItem item : itemsToUpload) {
-            tryUpload(context, cleanBaseUrl + "/api/assets", apiKey, deviceId, item);
-        }
-
-        Log.d("UniControlBackup", "Hintergrund-Backup Job erfolgreich abgeschlossen!");
-
-        // 5. WICHTIG: Den Wecker für exakt den nächsten Tag zur selben Uhrzeit stellen!
-        scheduleNextBackup(context, prefs);
-
-        return Result.success();
     }
 
-    // --- NEU: DIESE METHODE PROGRAMMIERT DEN WECKER FÜR DEN NÄCHSTEN TAG ---
+    private void showToast(final String message) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            Toast.makeText(getApplicationContext(), message, Toast.LENGTH_LONG).show();
+        });
+    }
+
     private void scheduleNextBackup(Context context, SharedPreferences prefs) {
         if (!prefs.getBoolean(SettingsFragment.KEY_AUTO_BACKUP_ENABLED, false)) return;
 
@@ -236,8 +488,9 @@ public class BackupWorker extends Worker {
         dueDate.set(Calendar.MINUTE, minute);
         dueDate.set(Calendar.SECOND, 0);
 
-        // Wir springen exakt 24 Stunden in die Zukunft
-        dueDate.add(Calendar.HOUR_OF_DAY, 24);
+        if (dueDate.before(currentDate)) {
+            dueDate.add(Calendar.HOUR_OF_DAY, 24);
+        }
 
         long timeDiff = dueDate.getTimeInMillis() - currentDate.getTimeInMillis();
 
@@ -246,7 +499,6 @@ public class BackupWorker extends Worker {
                 .setRequiresBatteryNotLow(true)
                 .build();
 
-        // Der Timer für morgen
         OneTimeWorkRequest backupRequest = new OneTimeWorkRequest.Builder(BackupWorker.class)
                 .setInitialDelay(timeDiff, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .setConstraints(constraints)
@@ -254,7 +506,7 @@ public class BackupWorker extends Worker {
 
         WorkManager.getInstance(context).enqueueUniqueWork(
                 "ImmichAutoBackup",
-                ExistingWorkPolicy.REPLACE, // Falls noch einer läuft, überschreiben wir ihn
+                ExistingWorkPolicy.REPLACE,
                 backupRequest);
     }
 
@@ -272,5 +524,6 @@ public class BackupWorker extends Worker {
         String path;
         long dateAddedMs;
         Uri contentUri;
+        String checksum; // Erforderlich für den neuen Immich Turbo-Check
     }
 }

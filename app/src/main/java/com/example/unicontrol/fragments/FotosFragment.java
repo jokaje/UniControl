@@ -44,6 +44,7 @@ import androidx.core.content.FileProvider;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.viewpager2.widget.ViewPager2;
 
 import com.bumptech.glide.Glide;
@@ -87,10 +88,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.Executors;
 
 public class FotosFragment extends Fragment {
 
+    private SwipeRefreshLayout swipeRefreshLayout;
     private RecyclerView recyclerViewFotos;
 
     private View layoutSearch;
@@ -167,6 +170,21 @@ public class FotosFragment extends Fragment {
         view.setBackgroundColor(getThemeColor());
 
         recyclerViewFotos = view.findViewById(R.id.recycler_view_fotos);
+        swipeRefreshLayout = view.findViewById(R.id.swipe_refresh_layout);
+
+        if (swipeRefreshLayout != null) {
+            swipeRefreshLayout.setColorSchemeColors(Color.parseColor("#8CA8B3"), getThemeColor());
+            swipeRefreshLayout.setOnRefreshListener(() -> {
+                if (!currentApiUrl.isEmpty() && !currentApiKey.isEmpty()) {
+                    currentPage = 1;
+                    isLastPage = false;
+                    syncFavoritesInBackground();
+                    fetchPhotosFromImmich(currentApiUrl, currentApiKey, currentPage);
+                } else {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
+            });
+        }
 
         layoutSearch = view.findViewById(R.id.layout_search);
         layoutSearchCategories = view.findViewById(R.id.layout_search_categories);
@@ -556,6 +574,7 @@ public class FotosFragment extends Fragment {
     private void showErrorOnUI(String errorMessage) {
         if (getActivity() != null) {
             getActivity().runOnUiThread(() -> {
+                if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
                 if (tvPlaceholder != null) {
                     tvPlaceholder.setVisibility(View.VISIBLE);
                     tvPlaceholder.setText(errorMessage);
@@ -2625,6 +2644,8 @@ public class FotosFragment extends Fragment {
                 fullscreenOverlay.setVisibility(View.GONE);
                 if (viewPagerFullscreen != null) viewPagerFullscreen.setAdapter(null);
                 hideKeyboard();
+                // Speicher aggressiv bereinigen, wenn der Vollbildmodus verlassen wird!
+                Glide.get(requireContext()).clearMemory();
             }).start();
         }
     }
@@ -2795,6 +2816,7 @@ public class FotosFragment extends Fragment {
                             getActivity().runOnUiThread(() -> {
                                 extractMetadataToCache(safeAssets);
                                 isLoading = false;
+                                if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
                                 if (tvPlaceholder != null) tvPlaceholder.setVisibility(View.GONE);
 
                                 // GANZ WICHTIG: Nur sichtbar machen, wenn wir auf dem "Fotos" Tab sind!
@@ -2807,14 +2829,17 @@ public class FotosFragment extends Fragment {
                         }
                     } else {
                         isLoading = false;
+                        if (getActivity() != null) getActivity().runOnUiThread(() -> { if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false); });
                         if (page == 1) showErrorOnUI("Keine Bilder gefunden.");
                     }
                 } else {
                     isLoading = false;
+                    if (getActivity() != null) getActivity().runOnUiThread(() -> { if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false); });
                     if (page == 1) showErrorOnUI("Fehler vom Server (" + responseCode + "):\n" + responseText);
                 }
             } catch (Exception e) {
                 isLoading = false;
+                if (getActivity() != null) getActivity().runOnUiThread(() -> { if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false); });
                 if (page == 1) showErrorOnUI("Verbindungsfehler: " + e.getMessage());
             } finally {
                 if (conn != null) conn.disconnect();
@@ -2871,7 +2896,10 @@ public class FotosFragment extends Fragment {
             int index = sortedAssets.indexOf(clickedAsset);
             openFullscreen(sortedAssets, index);
         });
-        targetRecyclerView.setAdapter(adapter);
+
+        // RAM SCHONEN: Wir nutzen swapAdapter statt setAdapter. So wirft die App
+        // nicht jedes Mal alle gespeicherten Kacheln in den Müll, wenn neue geladen werden!
+        targetRecyclerView.swapAdapter(adapter, true);
 
         if (recyclerViewState != null) {
             targetRecyclerView.getLayoutManager().onRestoreInstanceState(recyclerViewState);
@@ -2969,6 +2997,17 @@ public class FotosFragment extends Fragment {
                 }
                 return false;
             });
+        }
+
+        // RAM SCHONEN: Sobald der Nutzer im Vollbild zum nächsten Bild wischt,
+        // löschen wir das vorherige hochauflösende Original-Bild SOFORT aus dem Speicher!
+        @Override
+        public void onViewRecycled(@NonNull PagerViewHolder holder) {
+            super.onViewRecycled(holder);
+            Glide.with(context).clear(holder.imageView);
+            if (holder.videoView != null && holder.videoView.isPlaying()) {
+                holder.videoView.stopPlayback();
+            }
         }
 
         @Override

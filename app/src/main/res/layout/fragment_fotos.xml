@@ -32,14 +32,21 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent">
 
-            <!-- 1. FOTOS -->
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/recycler_view_fotos"
+            <!-- 1. FOTOS mit Pull-to-Refresh -->
+            <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+                android:id="@+id/swipe_refresh_layout"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:clipToPadding="false"
-                android:paddingBottom="100dp"
-                android:visibility="visible"/>
+                android:layout_height="match_parent">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recycler_view_fotos"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:paddingBottom="100dp"
+                    android:visibility="visible"/>
+
+            </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
             <!-- 2. SUCHE -->
             <androidx.core.widget.NestedScrollView
@@ -177,7 +184,7 @@
                         </LinearLayout>
                     </LinearLayout>
 
-                    <!-- Weitere Such-Kategorien (Kamera & Einstellungen fehlten hier!) -->
+                    <!-- Weitere Such-Kategorien -->
                     <LinearLayout
                         android:id="@+id/layout_search_bottom_buttons"
                         android:layout_width="match_parent"
@@ -213,7 +220,6 @@
                             android:textStyle="bold"
                             android:elevation="2dp"/>
 
-                        <!-- HIER SIND DIE BEIDEN FEHLENDEN BUTTONS -->
                         <TextView
                             android:id="@+id/btn_search_kamera"
                             android:layout_width="match_parent"
@@ -286,7 +292,7 @@
                     android:paddingBottom="100dp" />
             </LinearLayout>
 
-            <!-- 4. BIBLIOTHEK (NEU) -->
+            <!-- 4. BIBLIOTHEK -->
             <androidx.core.widget.NestedScrollView
                 android:id="@+id/layout_library"
                 android:layout_width="match_parent"
