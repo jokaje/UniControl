@@ -31,14 +31,17 @@ import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.work.Constraints;
 import androidx.work.Data;
+import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.ExistingWorkPolicy;
 import androidx.work.NetworkType;
 import androidx.work.OneTimeWorkRequest;
+import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
 
 import com.bumptech.glide.Glide;
 import com.example.unicontrol.R;
 import com.example.unicontrol.workers.BackupWorker;
+import com.example.unicontrol.workers.LocationWorker;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
@@ -53,6 +56,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class SettingsFragment extends Fragment {
 
@@ -80,7 +84,12 @@ public class SettingsFragment extends Fragment {
     public static final String KEY_AUTO_BACKUP_HOUR = "auto_backup_hour";
     public static final String KEY_AUTO_BACKUP_MINUTE = "auto_backup_minute";
 
+    // Home Assistant Tracker Keys
+    public static final String KEY_HOME_TOKEN = LocationWorker.KEY_HOME_TOKEN;
+    public static final String KEY_LOCATION_TRACKING_ENABLED = "location_tracking_enabled";
+
     private static final int REQUEST_CODE_PERMISSIONS = 1002;
+    private static final int REQUEST_CODE_LOCATION = 1004;
 
     @Nullable
     @Override
@@ -143,6 +152,21 @@ public class SettingsFragment extends Fragment {
             }
             if (allGranted) showBackupSettingsBottomSheet();
             else Toast.makeText(getContext(), "Berechtigung benötigt, um lokale Alben zu finden!", Toast.LENGTH_LONG).show();
+        } else if (requestCode == REQUEST_CODE_LOCATION) {
+            boolean allGranted = true;
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) { allGranted = false; break; }
+            }
+            if (allGranted) {
+                // Prüfen, ob wir nach Schritt 1 (Vordergrund) noch Schritt 2 (Hintergrund) brauchen
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                    Toast.makeText(getContext(), "Schritt 1 fertig! Klicke den Schalter nochmal für die Hintergrund-Erlaubnis.", Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(getContext(), "Alle GPS-Rechte erteilt! Du kannst den Schalter nun dauerhaft aktivieren.", Toast.LENGTH_LONG).show();
+                }
+            } else {
+                Toast.makeText(getContext(), "Bitte wähle 'Immer zulassen', sonst klappt das Tracking im Hintergrund nicht.", Toast.LENGTH_LONG).show();
+            }
         }
     }
 
@@ -429,7 +453,6 @@ public class SettingsFragment extends Fragment {
             container.addView(row);
         }
 
-        // --- DER BEREINIGTE MANUELLE BACKUP BUTTON ---
         LinearLayout uploadLayout = new LinearLayout(getContext());
         uploadLayout.setOrientation(LinearLayout.VERTICAL);
         uploadLayout.setGravity(Gravity.CENTER);
@@ -452,7 +475,6 @@ public class SettingsFragment extends Fragment {
                 return;
             }
 
-            // Wir geben dem BackupWorker mit, dass er MANUELL gestartet wurde (er ignoriert dann den Auto-Schalter)
             Data inputData = new Data.Builder()
                     .putBoolean("is_manual", true)
                     .build();
@@ -461,7 +483,6 @@ public class SettingsFragment extends Fragment {
                     .setInputData(inputData)
                     .build();
 
-            // Sende den Job an den Android WorkManager ab
             WorkManager.getInstance(requireContext()).enqueueUniqueWork(
                     "ImmichManualBackup",
                     ExistingWorkPolicy.REPLACE,
@@ -469,7 +490,7 @@ public class SettingsFragment extends Fragment {
             );
 
             Toast.makeText(getContext(), "Backup gestartet! Siehe Benachrichtigungsleiste.", Toast.LENGTH_LONG).show();
-            dialog.dismiss(); // Wir schließen das Menü, der Worker übernimmt ab hier!
+            dialog.dismiss();
         });
     }
 
@@ -504,6 +525,111 @@ public class SettingsFragment extends Fragment {
         EditText etFotosApiKey = sheetView.findViewById(R.id.et_fotos_api_key);
         Button btnSave = sheetView.findViewById(R.id.btn_save_settings);
 
+        ViewGroup parentLayout = (ViewGroup) btnSave.getParent();
+        if (parentLayout instanceof LinearLayout) {
+            int btnIndex = parentLayout.indexOfChild(btnSave);
+
+            EditText etToken = new EditText(getContext());
+            etToken.setHint("🔑 Home Assistant Token (Langlebig)");
+            etToken.setPadding(40, 40, 40, 40);
+            etToken.setBackground(ContextCompat.getDrawable(getContext(), R.drawable.bg_pill_selected));
+            etToken.setBackgroundTintList(ColorStateList.valueOf(Color.WHITE));
+            etToken.setTextColor(Color.parseColor("#333333"));
+            etToken.setHintTextColor(Color.parseColor("#888888"));
+            etToken.setTextSize(16f);
+            etToken.setElevation(2f);
+
+            LinearLayout.LayoutParams originalParams = (LinearLayout.LayoutParams) etSsid.getLayoutParams();
+            LinearLayout.LayoutParams tokenParams = new LinearLayout.LayoutParams(originalParams);
+            tokenParams.setMargins(originalParams.leftMargin, 24, originalParams.rightMargin, 24);
+            etToken.setLayoutParams(tokenParams);
+            parentLayout.addView(etToken, btnIndex);
+
+            SwitchCompat switchTracking = new SwitchCompat(getContext());
+            switchTracking.setText("🌍 Standort im Hintergrund an Home Assistant senden");
+            switchTracking.setTextColor(Color.parseColor("#333333"));
+            switchTracking.setTextSize(14f);
+            switchTracking.setTypeface(null, Typeface.BOLD);
+            switchTracking.setPadding(0, 16, 0, 48);
+
+            LinearLayout.LayoutParams switchParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            switchParams.setMargins(originalParams.leftMargin, 16, originalParams.rightMargin, 48);
+            switchTracking.setLayoutParams(switchParams);
+            parentLayout.addView(switchTracking, btnIndex + 1);
+
+            SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            etToken.setText(prefs.getString(KEY_HOME_TOKEN, ""));
+            switchTracking.setChecked(prefs.getBoolean(KEY_LOCATION_TRACKING_ENABLED, false));
+
+            // --- REPARIERT FÜR ANDROID 11+: Saubere, 2-stufige Rechte-Abfrage ---
+            switchTracking.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (isChecked) {
+                    if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                        // Schritt 1: Zuerst nur den normalen Vordergrund-Standort anfragen
+                        switchTracking.setChecked(false); // Aus lassen, bis der Nutzer bestätigt
+                        requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_CODE_LOCATION);
+
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                        // Schritt 2: Wenn der Vordergrund erlaubt ist, den Hintergrund gezielt anfragen
+                        switchTracking.setChecked(false); // Aus für den 2. Schritt
+                        Toast.makeText(getContext(), "WICHTIG: Bitte wähle gleich 'Immer zulassen' für das Hintergrund-Tracking!", Toast.LENGTH_LONG).show();
+                        requestPermissions(new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}, REQUEST_CODE_LOCATION);
+                    }
+                }
+            });
+
+            btnSave.setOnClickListener(v -> {
+                SharedPreferences.Editor editor = prefs.edit();
+                editor.putString(KEY_WIFI_SSID, etSsid.getText().toString().trim());
+                editor.putString(KEY_ECHO_LOCAL, etEchoLocal.getText().toString().trim());
+                editor.putString(KEY_ECHO_PUBLIC, etEchoPublic.getText().toString().trim());
+                editor.putString(KEY_WEB_LOCAL, etWebLocal.getText().toString().trim());
+                editor.putString(KEY_WEB_PUBLIC, etWebPublic.getText().toString().trim());
+                editor.putString(KEY_HOME_LOCAL, etHomeLocal.getText().toString().trim());
+                editor.putString(KEY_HOME_PUBLIC, etHomePublic.getText().toString().trim());
+                editor.putString(KEY_FOTOS_LOCAL, etFotosLocal.getText().toString().trim());
+                editor.putString(KEY_FOTOS_PUBLIC, etFotosPublic.getText().toString().trim());
+                editor.putString(KEY_FOTOS_API_KEY, etFotosApiKey.getText().toString().trim());
+
+                editor.putString(KEY_HOME_TOKEN, etToken.getText().toString().trim());
+                boolean isTracking = switchTracking.isChecked();
+                editor.putBoolean(KEY_LOCATION_TRACKING_ENABLED, isTracking);
+                editor.apply();
+
+                if (isTracking) {
+                    PeriodicWorkRequest locationRequest = new PeriodicWorkRequest.Builder(LocationWorker.class, 15, TimeUnit.MINUTES).build();
+                    WorkManager.getInstance(requireContext()).enqueueUniquePeriodicWork(
+                            "HomeAssistantLocation",
+                            ExistingPeriodicWorkPolicy.UPDATE,
+                            locationRequest);
+                    Toast.makeText(getContext(), "Netzwerk gespeichert & Tracking aktiv! 🌍", Toast.LENGTH_SHORT).show();
+                } else {
+                    WorkManager.getInstance(requireContext()).cancelUniqueWork("HomeAssistantLocation");
+                    Toast.makeText(getContext(), "Netzwerk gespeichert!", Toast.LENGTH_SHORT).show();
+                }
+
+                bottomSheetDialog.dismiss();
+            });
+
+        } else {
+            btnSave.setOnClickListener(v -> {
+                SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
+                editor.putString(KEY_WIFI_SSID, etSsid.getText().toString().trim());
+                editor.putString(KEY_ECHO_LOCAL, etEchoLocal.getText().toString().trim());
+                editor.putString(KEY_ECHO_PUBLIC, etEchoPublic.getText().toString().trim());
+                editor.putString(KEY_WEB_LOCAL, etWebLocal.getText().toString().trim());
+                editor.putString(KEY_WEB_PUBLIC, etWebPublic.getText().toString().trim());
+                editor.putString(KEY_HOME_LOCAL, etHomeLocal.getText().toString().trim());
+                editor.putString(KEY_HOME_PUBLIC, etHomePublic.getText().toString().trim());
+                editor.putString(KEY_FOTOS_LOCAL, etFotosLocal.getText().toString().trim());
+                editor.putString(KEY_FOTOS_PUBLIC, etFotosPublic.getText().toString().trim());
+                editor.putString(KEY_FOTOS_API_KEY, etFotosApiKey.getText().toString().trim());
+                editor.apply();
+                Toast.makeText(getContext(), "Netzwerk-Einstellungen gespeichert!", Toast.LENGTH_SHORT).show();
+                bottomSheetDialog.dismiss();
+            });
+        }
+
         SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         etSsid.setText(prefs.getString(KEY_WIFI_SSID, ""));
         etEchoLocal.setText(prefs.getString(KEY_ECHO_LOCAL, ""));
@@ -516,22 +642,6 @@ public class SettingsFragment extends Fragment {
         etFotosPublic.setText(prefs.getString(KEY_FOTOS_PUBLIC, ""));
         etFotosApiKey.setText(prefs.getString(KEY_FOTOS_API_KEY, ""));
 
-        btnSave.setOnClickListener(v -> {
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putString(KEY_WIFI_SSID, etSsid.getText().toString().trim());
-            editor.putString(KEY_ECHO_LOCAL, etEchoLocal.getText().toString().trim());
-            editor.putString(KEY_ECHO_PUBLIC, etEchoPublic.getText().toString().trim());
-            editor.putString(KEY_WEB_LOCAL, etWebLocal.getText().toString().trim());
-            editor.putString(KEY_WEB_PUBLIC, etWebPublic.getText().toString().trim());
-            editor.putString(KEY_HOME_LOCAL, etHomeLocal.getText().toString().trim());
-            editor.putString(KEY_HOME_PUBLIC, etHomePublic.getText().toString().trim());
-            editor.putString(KEY_FOTOS_LOCAL, etFotosLocal.getText().toString().trim());
-            editor.putString(KEY_FOTOS_PUBLIC, etFotosPublic.getText().toString().trim());
-            editor.putString(KEY_FOTOS_API_KEY, etFotosApiKey.getText().toString().trim());
-            editor.apply();
-            Toast.makeText(getContext(), "Netzwerk-Einstellungen gespeichert!", Toast.LENGTH_SHORT).show();
-            bottomSheetDialog.dismiss();
-        });
         bottomSheetDialog.show();
     }
 

@@ -1,10 +1,12 @@
 package com.example.unicontrol.fragments;
 
 import android.content.ClipData;
+import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -13,6 +15,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Parcelable;
+import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -89,6 +92,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TimeZone;
 import java.util.concurrent.Executors;
 
 public class FotosFragment extends Fragment {
@@ -123,12 +128,14 @@ public class FotosFragment extends Fragment {
 
     private TextView tabFotos, tabSuche, tabAlben, tabBibliothek;
 
-    // Steuerelemente für die Auswahl-Leisten
     private View layoutSelectionBar;
     private View layoutSelectionBottomBar;
     private TextView tvSelectionCount;
     private View btnCloseSelection;
     private ImageView btnSelectionShare, btnSelectionAddTo, btnSelectionDelete;
+
+    private ImageView btnShareFullscreen, btnEditFullscreen, btnAddToFullscreen, btnDeleteFullscreen;
+    private MaterialButton btnUploadLocal;
 
     private FotosAdapter currentFotosAdapter;
 
@@ -136,11 +143,15 @@ public class FotosFragment extends Fragment {
     private String currentApiKey = "";
     private List<ImmichAsset> globalAssetList = new ArrayList<>();
 
-    // NEU: Robuste Status-Variable für das aktuell sichtbare Tab (Samsung Fix)
+    private List<ImmichAsset> localMediaCache = new ArrayList<>();
+
     private String activeTab = "Fotos";
 
     private List<ImmichAsset> lastSearchResults = new ArrayList<>();
     private int lastSearchMode = -1; // 0=Fav, 1=Archiv, 2=Tresor, 3=Normal, 4=Smart
+
+    // --- NEU: Wir merken uns, in welchem Album wir uns gerade befinden ---
+    private String currentViewedAlbumId = null;
 
     private ImmichAsset currentViewedAsset = null;
 
@@ -190,6 +201,7 @@ public class FotosFragment extends Fragment {
                     currentPage = 1;
                     isLastPage = false;
                     syncFavoritesInBackground();
+                    loadLocalAssetsAsync();
                     fetchPhotosFromImmich(currentApiUrl, currentApiKey, currentPage);
                 } else {
                     swipeRefreshLayout.setRefreshing(false);
@@ -279,8 +291,189 @@ public class FotosFragment extends Fragment {
         loadAppropriateUrlAndKey();
     }
 
+    private List<ImmichAsset> filterLocalAssetsWithServer(List<ImmichAsset> localAssets) {
+        List<ImmichAsset> acceptedAssets = new ArrayList<>();
+        String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
+
+        int chunkSize = 500;
+
+        for (int i = 0; i < localAssets.size(); i += chunkSize) {
+            int end = Math.min(localAssets.size(), i + chunkSize);
+            List<ImmichAsset> chunk = localAssets.subList(i, end);
+
+            try {
+                JsonObject root = new JsonObject();
+                JsonArray assetsArray = new JsonArray();
+                for (ImmichAsset item : chunk) {
+                    JsonObject assetObj = new JsonObject();
+                    assetObj.addProperty("id", item.deviceAssetId);
+                    assetsArray.add(assetObj);
+                }
+                root.add("assets", assetsArray);
+                String jsonBody = root.toString();
+
+                URL url = new URL(cleanBaseUrl + "/api/asset/bulk-upload-check");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("x-api-key", currentApiKey);
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(10000);
+
+                OutputStream os = conn.getOutputStream();
+                os.write(jsonBody.getBytes("UTF-8"));
+                os.flush();
+                os.close();
+
+                int responseCode = conn.getResponseCode();
+
+                if (responseCode == 404 || responseCode == 405) {
+                    url = new URL(cleanBaseUrl + "/api/assets/bulk-upload-check");
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("x-api-key", currentApiKey);
+                    conn.setRequestProperty("Accept", "application/json");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setDoOutput(true);
+                    os = conn.getOutputStream();
+                    os.write(jsonBody.getBytes("UTF-8"));
+                    os.flush();
+                    os.close();
+                    responseCode = conn.getResponseCode();
+                }
+
+                if (responseCode == 200 || responseCode == 201) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                    StringBuilder response = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) response.append(line);
+                    reader.close();
+
+                    JsonObject responseObj = JsonParser.parseString(response.toString()).getAsJsonObject();
+                    if (responseObj.has("results")) {
+                        JsonArray results = responseObj.getAsJsonArray("results");
+                        HashSet<String> acceptedIds = new HashSet<>();
+                        for (JsonElement element : results) {
+                            JsonObject resObj = element.getAsJsonObject();
+                            if ("accept".equalsIgnoreCase(resObj.get("action").getAsString())) {
+                                acceptedIds.add(resObj.get("id").getAsString());
+                            }
+                        }
+                        for (ImmichAsset item : chunk) {
+                            if (acceptedIds.contains(item.deviceAssetId)) {
+                                acceptedAssets.add(item);
+                            }
+                        }
+                    } else {
+                        acceptedAssets.addAll(chunk);
+                    }
+                } else {
+                    acceptedAssets.addAll(chunk);
+                }
+            } catch (Exception e) {
+                acceptedAssets.addAll(chunk);
+            }
+        }
+        return acceptedAssets;
+    }
+
+    private void loadLocalAssetsAsync() {
+        Executors.newSingleThreadExecutor().execute(() -> {
+            List<ImmichAsset> tempLocalCache = new ArrayList<>();
+            if (getContext() == null) return;
+
+            SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+            Set<String> bucketIds = prefs.getStringSet(SettingsFragment.KEY_BACKUP_ALBUMS, new HashSet<>());
+            Set<String> blacklist = prefs.getStringSet("blacklisted_local_assets", new HashSet<>());
+
+            if (bucketIds.isEmpty()) return;
+
+            Uri[] uris = { MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI };
+            String[] projection = { MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.BUCKET_ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.MIME_TYPE };
+
+            StringBuilder selection = new StringBuilder(MediaStore.MediaColumns.BUCKET_ID + " IN (");
+            String[] selectionArgs = new String[bucketIds.size()];
+            int index = 0;
+            for (String id : bucketIds) {
+                selection.append("?");
+                if (index < bucketIds.size() - 1) selection.append(",");
+                selectionArgs[index] = id;
+                index++;
+            }
+            selection.append(")");
+
+            for (Uri uri : uris) {
+                try (Cursor cursor = getContext().getContentResolver().query(uri, projection, selection.toString(), selectionArgs, "DATE_ADDED DESC")) {
+                    if (cursor != null) {
+                        int idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+                        int dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED);
+                        int nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
+                        int mimeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE);
+
+                        while (cursor.moveToNext()) {
+                            String _id = cursor.getString(idCol);
+
+                            if (blacklist.contains(_id)) {
+                                continue;
+                            }
+
+                            ImmichAsset localAsset = new ImmichAsset();
+                            localAsset.id = "local_" + _id;
+                            localAsset.deviceAssetId = _id;
+                            localAsset.originalFileName = cursor.getString(nameCol);
+
+                            long dateMs = cursor.getLong(dateCol) * 1000L;
+                            SimpleDateFormat isoFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+                            isoFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+                            localAsset.fileCreatedAt = isoFormat.format(new Date(dateMs));
+
+                            String mime = cursor.getString(mimeCol);
+                            localAsset.type = (mime != null && mime.startsWith("video/")) ? "VIDEO" : "IMAGE";
+
+                            localAsset.isLocalOnly = true;
+                            localAsset.localUri = ContentUris.withAppendedId(uri, Long.parseLong(_id)).toString();
+
+                            tempLocalCache.add(localAsset);
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+
+            List<ImmichAsset> verifiedNewAssets = new ArrayList<>();
+            if (!tempLocalCache.isEmpty() && !currentApiUrl.isEmpty() && !currentApiKey.isEmpty()) {
+                verifiedNewAssets = filterLocalAssetsWithServer(tempLocalCache);
+            } else {
+                verifiedNewAssets = tempLocalCache;
+            }
+
+            final List<ImmichAsset> finalAssetsToDisplay = verifiedNewAssets;
+
+            if (getActivity() != null) {
+                getActivity().runOnUiThread(() -> {
+                    localMediaCache.clear();
+                    localMediaCache.addAll(finalAssetsToDisplay);
+
+                    if (!globalAssetList.isEmpty() && "Fotos".equals(activeTab)) {
+                        refreshVisibleGrids();
+                    }
+                });
+            }
+        });
+    }
+
     private void shareAssets(List<ImmichAsset> selected) {
         if (selected == null || selected.isEmpty() || getContext() == null) return;
+
+        for(ImmichAsset a : selected) {
+            if(a.isLocalOnly) {
+                Toast.makeText(getContext(), "Bitte warte, bis die Bilder hochgeladen sind, oder teile sie über die Samsung-Galerie.", Toast.LENGTH_LONG).show();
+                return;
+            }
+        }
 
         Toast.makeText(getContext(), "Lade " + selected.size() + (selected.size() == 1 ? " Datei" : " Dateien") + " zum Teilen herunter...", Toast.LENGTH_LONG).show();
 
@@ -366,69 +559,124 @@ public class FotosFragment extends Fragment {
     private void deleteAssets(List<ImmichAsset> selected) {
         if (selected == null || selected.isEmpty() || getContext() == null) return;
 
+        List<ImmichAsset> cloudAssetsToDelete = new ArrayList<>();
+        List<ImmichAsset> localOnlyAssetsToBlacklist = new ArrayList<>();
+
+        for(ImmichAsset a : selected) {
+            if(a.isLocalOnly) {
+                localOnlyAssetsToBlacklist.add(a);
+            } else {
+                cloudAssetsToDelete.add(a);
+            }
+        }
+
         new AlertDialog.Builder(getContext())
-                .setTitle(selected.size() + (selected.size() == 1 ? " Foto löschen" : " Fotos löschen"))
-                .setMessage("In den Papierkorb deines Immich-Servers verschieben?")
-                .setPositiveButton("Löschen", (dialog, which) -> {
-                    Toast.makeText(getContext(), "Wird gelöscht...", Toast.LENGTH_SHORT).show();
-                    Executors.newSingleThreadExecutor().execute(() -> {
-                        HttpURLConnection conn = null;
-                        try {
-                            String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
-                            URL url = new URL(cleanBaseUrl + "/api/asset");
-                            conn = (HttpURLConnection) url.openConnection();
-                            conn.setRequestMethod("DELETE");
-                            conn.setRequestProperty("x-api-key", currentApiKey);
-                            conn.setRequestProperty("Content-Type", "application/json");
-                            conn.setDoOutput(true);
+                .setTitle(selected.size() + (selected.size() == 1 ? " Foto ausblenden/löschen" : " Fotos ausblenden/löschen"))
+                .setMessage("Möchtest du diese Bilder in der Cloud löschen bzw. dauerhaft auf diesem Gerät ausblenden?")
+                .setPositiveButton("Ja, weg damit", (dialog, which) -> {
+                    Toast.makeText(getContext(), "Wird verarbeitet...", Toast.LENGTH_SHORT).show();
 
-                            StringBuilder ids = new StringBuilder();
-                            for (int i = 0; i < selected.size(); i++) {
-                                ids.append("\"").append(selected.get(i).id).append("\"");
-                                if (i < selected.size() - 1) ids.append(",");
-                            }
-                            String json = "{\"ids\": [" + ids.toString() + "]}";
+                    SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+                    Set<String> blacklist = new HashSet<>(prefs.getStringSet("blacklisted_local_assets", new HashSet<>()));
 
-                            conn.getOutputStream().write(json.getBytes("UTF-8"));
+                    if (!localOnlyAssetsToBlacklist.isEmpty()) {
+                        for (ImmichAsset a : localOnlyAssetsToBlacklist) {
+                            if (a.deviceAssetId != null) blacklist.add(a.deviceAssetId);
+                        }
+                        prefs.edit().putStringSet("blacklisted_local_assets", blacklist).apply();
 
-                            int responseCode = conn.getResponseCode();
+                        if (getActivity() != null) {
+                            getActivity().runOnUiThread(() -> {
+                                localMediaCache.removeAll(localOnlyAssetsToBlacklist);
 
-                            if (responseCode == 404 || responseCode == 405) {
-                                url = new URL(cleanBaseUrl + "/api/assets");
+                                if (cloudAssetsToDelete.isEmpty()) {
+                                    if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
+                                    refreshVisibleGrids();
+                                    if (fullscreenOverlay != null && fullscreenOverlay.getVisibility() == View.VISIBLE) {
+                                        closeFullscreen();
+                                    }
+                                    Toast.makeText(getContext(), "Aus der Ansicht entfernt!", Toast.LENGTH_SHORT).show();
+                                }
+                            });
+                        }
+                    }
+
+                    if (!cloudAssetsToDelete.isEmpty()) {
+                        Executors.newSingleThreadExecutor().execute(() -> {
+                            HttpURLConnection conn = null;
+                            try {
+                                String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
+                                URL url = new URL(cleanBaseUrl + "/api/asset");
                                 conn = (HttpURLConnection) url.openConnection();
                                 conn.setRequestMethod("DELETE");
                                 conn.setRequestProperty("x-api-key", currentApiKey);
                                 conn.setRequestProperty("Content-Type", "application/json");
                                 conn.setDoOutput(true);
-                                conn.getOutputStream().write(json.getBytes("UTF-8"));
-                                responseCode = conn.getResponseCode();
-                            }
 
-                            if (responseCode == 200 || responseCode == 201 || responseCode == 204) {
-                                if (getActivity() != null) {
-                                    getActivity().runOnUiThread(() -> {
-                                        globalAssetList.removeAll(selected);
-                                        if (lastSearchResults != null) lastSearchResults.removeAll(selected);
-                                        if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
-                                        refreshVisibleGrids();
-                                        if (fullscreenOverlay != null && fullscreenOverlay.getVisibility() == View.VISIBLE) {
-                                            closeFullscreen();
-                                        }
-                                        Toast.makeText(getContext(), selected.size() + (selected.size() == 1 ? " Element gelöscht" : " Elemente gelöscht"), Toast.LENGTH_SHORT).show();
-                                    });
+                                StringBuilder ids = new StringBuilder();
+                                for (int i = 0; i < cloudAssetsToDelete.size(); i++) {
+                                    ids.append("\"").append(cloudAssetsToDelete.get(i).id).append("\"");
+                                    if (i < cloudAssetsToDelete.size() - 1) ids.append(",");
                                 }
-                            } else {
-                                if (getActivity() != null) {
-                                    int finalResponseCode = responseCode;
-                                    getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Löschen fehlgeschlagen (" + finalResponseCode + ")", Toast.LENGTH_LONG).show());
+                                String json = "{\"ids\": [" + ids.toString() + "]}";
+
+                                conn.getOutputStream().write(json.getBytes("UTF-8"));
+
+                                int responseCode = conn.getResponseCode();
+
+                                if (responseCode == 404 || responseCode == 405) {
+                                    url = new URL(cleanBaseUrl + "/api/assets");
+                                    conn = (HttpURLConnection) url.openConnection();
+                                    conn.setRequestMethod("DELETE");
+                                    conn.setRequestProperty("x-api-key", currentApiKey);
+                                    conn.setRequestProperty("Content-Type", "application/json");
+                                    conn.setDoOutput(true);
+                                    conn.getOutputStream().write(json.getBytes("UTF-8"));
+                                    responseCode = conn.getResponseCode();
                                 }
+
+                                if (responseCode == 200 || responseCode == 201 || responseCode == 204) {
+                                    for (ImmichAsset a : cloudAssetsToDelete) {
+                                        if (a.deviceAssetId != null) blacklist.add(a.deviceAssetId);
+                                    }
+                                    prefs.edit().putStringSet("blacklisted_local_assets", blacklist).apply();
+
+                                    if (getActivity() != null) {
+                                        getActivity().runOnUiThread(() -> {
+                                            globalAssetList.removeAll(cloudAssetsToDelete);
+                                            if (lastSearchResults != null) lastSearchResults.removeAll(cloudAssetsToDelete);
+
+                                            for (ImmichAsset deletedAsset : cloudAssetsToDelete) {
+                                                java.util.Iterator<ImmichAsset> it = localMediaCache.iterator();
+                                                while (it.hasNext()) {
+                                                    ImmichAsset local = it.next();
+                                                    if (local.deviceAssetId != null && local.deviceAssetId.equals(deletedAsset.deviceAssetId)) {
+                                                        it.remove();
+                                                    }
+                                                }
+                                            }
+
+                                            if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
+                                            refreshVisibleGrids();
+                                            if (fullscreenOverlay != null && fullscreenOverlay.getVisibility() == View.VISIBLE) {
+                                                closeFullscreen();
+                                            }
+                                            Toast.makeText(getContext(), cloudAssetsToDelete.size() + (cloudAssetsToDelete.size() == 1 ? " Element gelöscht" : " Elemente gelöscht"), Toast.LENGTH_SHORT).show();
+                                        });
+                                    }
+                                } else {
+                                    if (getActivity() != null) {
+                                        int finalResponseCode = responseCode;
+                                        getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Löschen fehlgeschlagen (" + finalResponseCode + ")", Toast.LENGTH_LONG).show());
+                                    }
+                                }
+                            } catch (Exception e) {
+                                if (getActivity() != null) getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Netzwerkfehler beim Löschen", Toast.LENGTH_SHORT).show());
+                            } finally {
+                                if (conn != null) conn.disconnect();
                             }
-                        } catch (Exception e) {
-                            if (getActivity() != null) getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Netzwerkfehler beim Löschen", Toast.LENGTH_SHORT).show());
-                        } finally {
-                            if (conn != null) conn.disconnect();
-                        }
-                    });
+                        });
+                    }
                 })
                 .setNegativeButton("Abbrechen", null).show();
     }
@@ -437,6 +685,15 @@ public class FotosFragment extends Fragment {
         if (getContext() == null || currentFotosAdapter == null) return;
         List<ImmichAsset> selected = currentFotosAdapter.getSelectedAssets();
         if (selected.isEmpty()) return;
+
+        for(ImmichAsset a : selected) {
+            if(a.isLocalOnly) {
+                Toast.makeText(getContext(), "Cloud-Aktionen sind erst möglich, wenn die Bilder (☁️) hochgeladen wurden.", Toast.LENGTH_LONG).show();
+                if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
+                return;
+            }
+        }
+
         showActionMenu(selected);
     }
 
@@ -517,12 +774,28 @@ public class FotosFragment extends Fragment {
 
             if (getActivity() != null) {
                 getActivity().runOnUiThread(() -> {
+                    SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+                    Set<String> blacklist = new HashSet<>(prefs.getStringSet("blacklisted_local_assets", new HashSet<>()));
+
                     for (ImmichAsset asset : selected) {
                         asset.isArchived = toArchive;
                         if (!toArchive && !globalAssetList.contains(asset)) {
                             globalAssetList.add(asset);
                         }
+
+                        if (toArchive && asset.deviceAssetId != null) {
+                            blacklist.add(asset.deviceAssetId);
+                            java.util.Iterator<ImmichAsset> it = localMediaCache.iterator();
+                            while (it.hasNext()) {
+                                ImmichAsset local = it.next();
+                                if (local.deviceAssetId != null && local.deviceAssetId.equals(asset.deviceAssetId)) {
+                                    it.remove();
+                                }
+                            }
+                        }
                     }
+
+                    prefs.edit().putStringSet("blacklisted_local_assets", blacklist).apply();
 
                     if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
                     refreshVisibleGrids();
@@ -540,10 +813,16 @@ public class FotosFragment extends Fragment {
         if (layoutAlbums != null) layoutAlbums.setVisibility(View.GONE);
         if (etSearchInput != null) etSearchInput.setVisibility(View.GONE);
         if (layoutSearch != null) layoutSearch.setVisibility(View.VISIBLE);
+
+        // NEU: ScrollView komplett verstecken, damit die Bildliste den vollen Platz & RAM nutzen darf!
+        View scrollableMenus = getView() != null ? getView().findViewById(R.id.layout_search_scrollable_menus) : null;
+        if (scrollableMenus != null) scrollableMenus.setVisibility(View.GONE);
     }
 
     private void prepareForSearchResults() {
         hideAllMenusForSearch();
+        // NEU: Sobald wir das Album verlassen, setzen wir die ID wieder zurück!
+        currentViewedAlbumId = null;
     }
 
     private List<ImmichAsset> parseAssetsFromJson(JsonElement jsonElement) {
@@ -760,6 +1039,9 @@ public class FotosFragment extends Fragment {
         if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
 
         prepareForSearchResults();
+        // NEU: Wir merken uns die ID, damit wir später Bilder genau hieraus löschen können!
+        currentViewedAlbumId = albumId;
+
         recyclerViewSearch.setVisibility(View.GONE);
 
         tvSearchLoading.setVisibility(View.VISIBLE);
@@ -831,7 +1113,6 @@ public class FotosFragment extends Fragment {
                 tvSearchLoading.setVisibility(View.GONE);
                 Toast.makeText(getContext(), msg, Toast.LENGTH_LONG).show();
 
-                // ROBUSTER FIX: Statt isBold() nutzen wir unsere feste Variable
                 if ("Fotos".equals(activeTab)) selectTab(tabFotos, "Fotos");
                 else if ("Suche".equals(activeTab)) selectTab(tabSuche, "Suche");
                 else if ("Alben".equals(activeTab)) selectTab(tabAlben, "Alben");
@@ -846,7 +1127,6 @@ public class FotosFragment extends Fragment {
                 if (tvSearchLoading != null) tvSearchLoading.setVisibility(View.GONE);
                 Toast.makeText(getContext(), msg, Toast.LENGTH_LONG).show();
 
-                // ROBUSTER FIX: Statt isBold() nutzen wir unsere feste Variable
                 if ("Fotos".equals(activeTab)) selectTab(tabFotos, "Fotos");
                 else if ("Suche".equals(activeTab)) selectTab(tabSuche, "Suche");
                 else if ("Alben".equals(activeTab)) selectTab(tabAlben, "Alben");
@@ -874,8 +1154,9 @@ public class FotosFragment extends Fragment {
     private void selectTab(TextView selectedTab, String tabName) {
         if (getContext() == null) return;
 
-        // NEU: Speichern des aktiven Tabs für zuverlässige Abfragen
         activeTab = tabName;
+        // NEU: Beim Tab-Wechsel setzen wir das Album zurück
+        currentViewedAlbumId = null;
 
         if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
 
@@ -908,6 +1189,11 @@ public class FotosFragment extends Fragment {
             tvPlaceholder.setVisibility(globalAssetList == null || globalAssetList.isEmpty() ? View.VISIBLE : View.GONE);
         } else if (tabName.equals("Suche")) {
             layoutSearch.setVisibility(View.VISIBLE);
+
+            // NEU: Menüs wieder einblenden, wenn der User den Tab anklickt
+            View scrollableMenus = getView() != null ? getView().findViewById(R.id.layout_search_scrollable_menus) : null;
+            if (scrollableMenus != null) scrollableMenus.setVisibility(View.VISIBLE);
+
             if(etSearchInput != null) {
                 etSearchInput.setVisibility(View.VISIBLE);
                 etSearchInput.setText("");
@@ -1297,20 +1583,57 @@ public class FotosFragment extends Fragment {
                 return;
             }
 
+            // Für Custom Freitext-Suchen leiten wir das an die clevere Immich KI weiter
+            if (selectedMode[0].equals("custom")) {
+                if (etSearchInput != null) {
+                    etSearchInput.setText(finalQuery);
+                    etSearchInput.clearFocus();
+                }
+                hideKeyboard();
+                performImmichSmartSearch(finalQuery);
+                dialog.dismiss();
+                return;
+            }
+
+            // --- FIX: Für harte Daten nutzen wir ab sofort 'takenAfter' (Aufnahmedatum) statt 'createdAfter' (Upload-Datum) ---
+            JsonObject json = new JsonObject();
+            json.addProperty("withExif", true);
+            json.addProperty("size", 1000);
+
+            SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+            iso.setTimeZone(TimeZone.getTimeZone("UTC"));
+            Calendar cal = Calendar.getInstance();
+
+            if (selectedMode[0].equals("last_1")) {
+                cal.add(Calendar.MONTH, -1);
+                json.addProperty("takenAfter", iso.format(cal.getTime()));
+            } else if (selectedMode[0].equals("last_3")) {
+                cal.add(Calendar.MONTH, -3);
+                json.addProperty("takenAfter", iso.format(cal.getTime()));
+            } else if (selectedMode[0].equals("last_9")) {
+                cal.add(Calendar.MONTH, -9);
+                json.addProperty("takenAfter", iso.format(cal.getTime()));
+            } else if (selectedMode[0].equals("year")) {
+                String yearStr = actvYear.getText().toString().trim();
+                json.addProperty("takenAfter", yearStr + "-01-01T00:00:00.000Z");
+                json.addProperty("takenBefore", yearStr + "-12-31T23:59:59.999Z");
+            }
+
             if (etSearchInput != null) {
                 etSearchInput.setText(finalQuery);
                 etSearchInput.clearFocus();
             }
             hideKeyboard();
-            performCloudMetadataSearch("{\"query\": \"" + finalQuery + "\", \"q\": \"" + finalQuery + "\", \"withExif\": true}", "Suchen...");
+            performCloudMetadataSearch(json.toString(), "Lade Bilder aus dem Zeitraum...");
             dialog.dismiss();
         });
 
         dialog.show();
     }
 
+    // --- NEU: Aufgeräumte Ortssuche ohne nervige Vorschläge und ohne Zusatztext ---
     private void showLocationFilterBottomSheet() {
-        if (getContext() == null || globalAssetList == null) return;
+        if (getContext() == null) return; // globalAssetList Check entfernt!
 
         BottomSheetDialog dialog = new BottomSheetDialog(getContext());
         View sheetView = LayoutInflater.from(getContext()).inflate(R.layout.bottom_sheet_location_filter, null);
@@ -1326,81 +1649,10 @@ public class FotosFragment extends Fragment {
         MaterialButton btnClear = sheetView.findViewById(R.id.btn_clear_location);
         MaterialButton btnApply = sheetView.findViewById(R.id.btn_apply_location);
 
-        HashSet<String> countriesSet = new HashSet<>();
-        HashSet<String> statesSet = new HashSet<>();
-        HashSet<String> citiesSet = new HashSet<>();
-
-        for (ImmichAsset asset : globalAssetList) {
-            if (asset.exifInfo != null) {
-                if (asset.exifInfo.country != null && !asset.exifInfo.country.trim().isEmpty()) countriesSet.add(asset.exifInfo.country.trim());
-                if (asset.exifInfo.state != null && !asset.exifInfo.state.trim().isEmpty()) statesSet.add(asset.exifInfo.state.trim());
-                if (asset.exifInfo.city != null && !asset.exifInfo.city.trim().isEmpty()) citiesSet.add(asset.exifInfo.city.trim());
-            }
-        }
-
-        List<String> countriesList = new ArrayList<>(countriesSet); Collections.sort(countriesList);
-        List<String> statesList = new ArrayList<>(statesSet); Collections.sort(statesList);
-        List<String> citiesList = new ArrayList<>(citiesSet); Collections.sort(citiesList);
-
-        ArrayAdapter<String> countryAdapter = new ArrayAdapter<String>(getContext(), android.R.layout.simple_dropdown_item_1line, countriesList) {
-            @NonNull @Override public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
-                View view = super.getView(position, convertView, parent);
-                ((TextView) view).setTextColor(Color.parseColor("#333333"));
-                return view;
-            }
-            @Override public View getDropDownView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
-                View view = super.getDropDownView(position, convertView, parent);
-                ((TextView) view).setTextColor(Color.parseColor("#333333"));
-                return view;
-            }
-        };
-        actvCountry.setAdapter(countryAdapter);
-
-        ArrayAdapter<String> stateAdapter = new ArrayAdapter<String>(getContext(), android.R.layout.simple_dropdown_item_1line, statesList) {
-            @NonNull @Override public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
-                View view = super.getView(position, convertView, parent);
-                ((TextView) view).setTextColor(Color.parseColor("#333333"));
-                return view;
-            }
-            @Override public View getDropDownView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
-                View view = super.getDropDownView(position, convertView, parent);
-                ((TextView) view).setTextColor(Color.parseColor("#333333"));
-                return view;
-            }
-        };
-        actvState.setAdapter(stateAdapter);
-
-        ArrayAdapter<String> cityAdapter = new ArrayAdapter<String>(getContext(), android.R.layout.simple_dropdown_item_1line, citiesList) {
-            @NonNull @Override public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
-                View view = super.getView(position, convertView, parent);
-                ((TextView) view).setTextColor(Color.parseColor("#333333"));
-                return view;
-            }
-            @Override public View getDropDownView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
-                View view = super.getDropDownView(position, convertView, parent);
-                ((TextView) view).setTextColor(Color.parseColor("#333333"));
-                return view;
-            }
-        };
-        actvCity.setAdapter(cityAdapter);
-
-        actvCountry.setThreshold(0);
-        actvCountry.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_UP) actvCountry.showDropDown();
-            return false;
-        });
-
-        actvState.setThreshold(0);
-        actvState.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_UP) actvState.showDropDown();
-            return false;
-        });
-
-        actvCity.setThreshold(0);
-        actvCity.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_UP) actvCity.showDropDown();
-            return false;
-        });
+        // --- NEU: Cleane Textfelder, der Nutzer darf absolut alles frei eintippen! ---
+        actvCountry.setHint("🌍 Land (z.B. Deutschland)");
+        actvState.setHint("🗺️ Bundesland (z.B. Bayern)");
+        actvCity.setHint("🏙️ Stadt (z.B. Schopfheim)");
 
         btnClear.setOnClickListener(v -> {
             actvCountry.setText("", false);
@@ -1415,6 +1667,8 @@ public class FotosFragment extends Fragment {
             String selectedCountry = actvCountry.getText().toString().trim();
             String selectedState = actvState.getText().toString().trim();
             String selectedCity = actvCity.getText().toString().trim();
+
+            hideKeyboard();
             applyCloudLocationFilter(selectedCountry, selectedState, selectedCity);
             dialog.dismiss();
         });
@@ -1654,7 +1908,6 @@ public class FotosFragment extends Fragment {
             }
         }
 
-        // --- NEU: ADAPTER-AUFRUF MIT CALLBACK FÜR MULTI-SELECT ---
         currentFotosAdapter = new FotosAdapter(getContext(), relevanceItems, baseUrl, apiKey,
                 clickedAsset -> {
                     int index = rawListToProcess.indexOf(clickedAsset);
@@ -1675,7 +1928,13 @@ public class FotosFragment extends Fragment {
                     }
                 }
         );
-        targetRecyclerView.swapAdapter(currentFotosAdapter, true);
+
+        if (targetRecyclerView.getAdapter() != null && !(targetRecyclerView.getAdapter() instanceof FotosAdapter)) {
+            targetRecyclerView.getRecycledViewPool().clear();
+            targetRecyclerView.setAdapter(currentFotosAdapter);
+        } else {
+            targetRecyclerView.swapAdapter(currentFotosAdapter, true);
+        }
 
         if (recyclerViewState != null) {
             targetRecyclerView.getLayoutManager().onRestoreInstanceState(recyclerViewState);
@@ -1938,36 +2197,66 @@ public class FotosFragment extends Fragment {
 
         View moreOptions = view.findViewById(R.id.btn_more_options);
         if (moreOptions != null) moreOptions.setOnClickListener(v -> {
-            if (getContext() == null) return;
+            if (getContext() == null || currentViewedAsset == null) return;
             PopupMenu popup = new PopupMenu(getContext(), v);
             popup.getMenu().add("Details einblenden");
+
+            // NEU: Wenn wir in einem Album sind, zeigen wir den Button zum Entfernen an!
+            if (currentViewedAlbumId != null) {
+                popup.getMenu().add("Aus Album entfernen");
+            }
+
             popup.setOnMenuItemClickListener(item -> {
-                if (item.getTitle().equals("Details") && bottomSheetBehavior != null) bottomSheetBehavior.setState(BottomSheetBehavior.STATE_EXPANDED);
+                String title = item.getTitle().toString();
+                // FIX: Wir prüfen auf den exakten, neuen Namen des Buttons
+                if (title.equals("Details einblenden") && bottomSheetBehavior != null) {
+                    bottomSheetBehavior.setState(BottomSheetBehavior.STATE_EXPANDED);
+                }
+                // NEU: Klick auf "Aus Album entfernen"
+                else if (title.equals("Aus Album entfernen")) {
+                    removeAssetFromAlbumServer(currentViewedAsset, currentViewedAlbumId);
+                }
                 return true;
             });
             popup.show();
         });
 
-        View btnShare = view.findViewById(R.id.btn_share);
-        if (btnShare != null) btnShare.setOnClickListener(v -> {
+        btnShareFullscreen = view.findViewById(R.id.btn_share);
+        btnEditFullscreen = view.findViewById(R.id.btn_edit);
+        btnAddToFullscreen = view.findViewById(R.id.btn_add_to);
+        btnDeleteFullscreen = view.findViewById(R.id.btn_delete);
+
+        if (btnShareFullscreen != null) {
+            LinearLayout bottomMenu = (LinearLayout) btnShareFullscreen.getParent();
+            btnUploadLocal = new MaterialButton(getContext());
+            btnUploadLocal.setText("☁️ Jetzt hochladen");
+            btnUploadLocal.setTextColor(Color.WHITE);
+            btnUploadLocal.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#8CA8B3")));
+            btnUploadLocal.setCornerRadius(60);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            btnUploadLocal.setLayoutParams(params);
+            btnUploadLocal.setVisibility(View.GONE);
+            btnUploadLocal.setOnClickListener(v -> uploadSingleAsset(currentViewedAsset));
+            bottomMenu.addView(btnUploadLocal);
+        }
+
+        if (btnShareFullscreen != null) btnShareFullscreen.setOnClickListener(v -> {
             if (currentViewedAsset == null || getContext() == null) return;
             List<ImmichAsset> singleList = new ArrayList<>();
             singleList.add(currentViewedAsset);
             shareAssets(singleList);
         });
 
-        View btnEdit = view.findViewById(R.id.btn_edit);
-        if (btnEdit != null) btnEdit.setOnClickListener(v -> editCurrentAsset());
+        if (btnEditFullscreen != null) btnEditFullscreen.setOnClickListener(v -> editCurrentAsset());
 
-        View btnAddTo = view.findViewById(R.id.btn_add_to);
-        if (btnAddTo != null) btnAddTo.setOnClickListener(v -> {
+        if (btnAddToFullscreen != null) btnAddToFullscreen.setOnClickListener(v -> {
             if (currentViewedAsset == null) return;
             List<ImmichAsset> singleList = new ArrayList<>();
             singleList.add(currentViewedAsset);
             showActionMenu(singleList);
         });
 
-        if (view.findViewById(R.id.btn_delete) != null) view.findViewById(R.id.btn_delete).setOnClickListener(v -> {
+        if (btnDeleteFullscreen != null) btnDeleteFullscreen.setOnClickListener(v -> {
             if (currentViewedAsset == null) return;
             List<ImmichAsset> singleList = new ArrayList<>();
             singleList.add(currentViewedAsset);
@@ -1975,8 +2264,112 @@ public class FotosFragment extends Fragment {
         });
     }
 
+    // --- NEU: Verbesserte Album-Entfernen Funktion mit 400-Fallback und Fehler-Ausleser ---
+    private void removeAssetFromAlbumServer(ImmichAsset asset, String albumId) {
+        if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
+        Toast.makeText(getContext(), "Wird aus Album entfernt...", Toast.LENGTH_SHORT).show();
+
+        Executors.newSingleThreadExecutor().execute(() -> {
+            HttpURLConnection conn = null;
+            try {
+                String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
+                URL url = new URL(cleanBaseUrl + "/api/albums/" + albumId + "/assets");
+
+                // Wir bereiten beide JSON-Varianten vor, die Immich erwarten könnte
+                String jsonAssetIds = "{\"assetIds\": [\"" + asset.id + "\"]}";
+                String jsonIds = "{\"ids\": [\"" + asset.id + "\"]}";
+
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("DELETE");
+                conn.setRequestProperty("x-api-key", currentApiKey);
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+                // Versuch 1
+                conn.getOutputStream().write(jsonAssetIds.getBytes("UTF-8"));
+
+                int responseCode = conn.getResponseCode();
+
+                // Versuch 2: Falls der Server das Format 'assetIds' ablehnt (Fehler 400), probieren wir sofort 'ids'
+                if (responseCode == 400) {
+                    url = new URL(cleanBaseUrl + "/api/albums/" + albumId + "/assets");
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("DELETE");
+                    conn.setRequestProperty("x-api-key", currentApiKey);
+                    conn.setRequestProperty("Accept", "application/json");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setDoOutput(true);
+                    conn.getOutputStream().write(jsonIds.getBytes("UTF-8"));
+                    responseCode = conn.getResponseCode();
+                }
+
+                // Versuch 3: Falls der API-Pfad der alten Immich-Version entspricht
+                if (responseCode == 404 || responseCode == 405) {
+                    url = new URL(cleanBaseUrl + "/api/album/" + albumId + "/assets");
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("DELETE");
+                    conn.setRequestProperty("x-api-key", currentApiKey);
+                    conn.setRequestProperty("Accept", "application/json");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setDoOutput(true);
+                    conn.getOutputStream().write(jsonAssetIds.getBytes("UTF-8"));
+                    responseCode = conn.getResponseCode();
+                }
+
+                // Wir fangen die detaillierte Fehlermeldung von Immich ab, falls es immer noch fehlschlägt
+                String errorResponse = "";
+                if (responseCode >= 400) {
+                    try {
+                        InputStream es = conn.getErrorStream();
+                        if (es != null) {
+                            BufferedReader er = new BufferedReader(new InputStreamReader(es));
+                            StringBuilder errBuilder = new StringBuilder();
+                            String l;
+                            while ((l = er.readLine()) != null) errBuilder.append(l);
+                            errorResponse = errBuilder.toString();
+                            er.close();
+                        }
+                    } catch (Exception e) {}
+                }
+
+                int finalResponseCode = responseCode;
+                String finalErrorResponse = errorResponse;
+
+                if (responseCode == 200 || responseCode == 201 || responseCode == 204) {
+                    if (getActivity() != null) {
+                        getActivity().runOnUiThread(() -> {
+                            if (lastSearchResults != null) lastSearchResults.remove(asset);
+                            refreshVisibleGrids();
+                            closeFullscreen();
+                            Toast.makeText(getContext(), "Aus Album entfernt!", Toast.LENGTH_SHORT).show();
+                        });
+                    }
+                } else {
+                    if (getActivity() != null) {
+                        getActivity().runOnUiThread(() -> {
+                            if (finalErrorResponse.isEmpty()) {
+                                Toast.makeText(getContext(), "Fehler beim Entfernen (" + finalResponseCode + ")", Toast.LENGTH_SHORT).show();
+                            } else {
+                                Toast.makeText(getContext(), "Fehler (" + finalResponseCode + "): " + finalErrorResponse, Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }
+                }
+            } catch (Exception e) {
+                if (getActivity() != null) getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Netzwerkfehler", Toast.LENGTH_SHORT).show());
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        });
+    }
+
     private void editCurrentAsset() {
         if (currentViewedAsset == null || getContext() == null) return;
+
+        if (currentViewedAsset.isLocalOnly) {
+            Toast.makeText(getContext(), "Dieses Bild wurde noch nicht hochgeladen (☁️). Bitte bearbeite es in der Samsung Galerie.", Toast.LENGTH_LONG).show();
+            return;
+        }
 
         Toast.makeText(getContext(), "Lade in Editor...", Toast.LENGTH_SHORT).show();
 
@@ -2108,24 +2501,28 @@ public class FotosFragment extends Fragment {
 
                     if (getActivity() != null) {
                         getActivity().runOnUiThread(() -> {
+                            tvAlbumsLoading.setVisibility(View.GONE);
                             if (globalAlbumList != null && !globalAlbumList.isEmpty()) {
-                                populateAlbumsInBottomSheet(dialog, tvTitle, container, assetsToModify);
+                                recyclerViewAlbums.setVisibility(View.VISIBLE);
+                                displayAlbums(globalAlbumList);
                             } else {
-                                tvTitle.setText("Keine Alben gefunden");
-                                container.removeAllViews();
+                                Toast.makeText(getContext(), "Du hast noch keine Alben erstellt.", Toast.LENGTH_SHORT).show();
                             }
                         });
                     }
                 } else {
-                    if (getActivity() != null) getActivity().runOnUiThread(() -> {
-                        tvTitle.setText("Fehler beim Laden");
-                        container.removeAllViews();
-                    });
+                    if (getActivity() != null) {
+                        int finalResponseCode = responseCode;
+                        getActivity().runOnUiThread(() -> {
+                            tvAlbumsLoading.setVisibility(View.GONE);
+                            Toast.makeText(getContext(), "Fehler beim Laden der Alben (" + finalResponseCode + ")", Toast.LENGTH_SHORT).show();
+                        });
+                    }
                 }
             } catch (Exception e) {
                 if (getActivity() != null) getActivity().runOnUiThread(() -> {
-                    tvTitle.setText("Netzwerkfehler");
-                    container.removeAllViews();
+                    tvAlbumsLoading.setVisibility(View.GONE);
+                    Toast.makeText(getContext(), "Verbindungsfehler zu Alben.", Toast.LENGTH_SHORT).show();
                 });
             }
         });
@@ -2165,11 +2562,25 @@ public class FotosFragment extends Fragment {
                     ids.append("\"").append(assetsToModify.get(i).id).append("\"");
                     if (i < assetsToModify.size() - 1) ids.append(",");
                 }
-                String json = "{\"assetIds\": [" + ids.toString() + "]}";
+
+                String json = "{\"assetIds\": [" + ids.toString() + "], \"ids\": [" + ids.toString() + "]}";
 
                 conn.getOutputStream().write(json.getBytes("UTF-8"));
 
                 int responseCode = conn.getResponseCode();
+
+                if (responseCode == 400) {
+                    url = new URL(cleanBaseUrl + "/api/albums/" + albumId + "/assets");
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("PUT");
+                    conn.setRequestProperty("x-api-key", currentApiKey);
+                    conn.setRequestProperty("Accept", "application/json");
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    conn.setDoOutput(true);
+                    String jsonAlternative = "{\"assetIds\": [" + ids.toString() + "]}";
+                    conn.getOutputStream().write(jsonAlternative.getBytes("UTF-8"));
+                    responseCode = conn.getResponseCode();
+                }
 
                 if (responseCode == 404 || responseCode == 405) {
                     url = new URL(cleanBaseUrl + "/api/album/" + albumId + "/assets");
@@ -2183,6 +2594,24 @@ public class FotosFragment extends Fragment {
                     responseCode = conn.getResponseCode();
                 }
 
+                String errorResponse = "";
+                if (responseCode >= 400) {
+                    try {
+                        InputStream es = conn.getErrorStream();
+                        if (es != null) {
+                            BufferedReader er = new BufferedReader(new InputStreamReader(es));
+                            StringBuilder errBuilder = new StringBuilder();
+                            String l;
+                            while ((l = er.readLine()) != null) errBuilder.append(l);
+                            errorResponse = errBuilder.toString();
+                            er.close();
+                        }
+                    } catch (Exception e) {}
+                }
+
+                int finalResponseCode = responseCode;
+                String finalErrorResponse = errorResponse;
+
                 if (responseCode == 200 || responseCode == 201 || responseCode == 204) {
                     if (getActivity() != null) getActivity().runOnUiThread(() -> {
                         if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
@@ -2190,10 +2619,13 @@ public class FotosFragment extends Fragment {
                     });
                 } else {
                     if (getActivity() != null) {
-                        int finalResponseCode = responseCode;
-                        getActivity().runOnUiThread(() ->
-                                Toast.makeText(getContext(), "Fehler beim Hinzufügen (" + finalResponseCode + ")", Toast.LENGTH_SHORT).show()
-                        );
+                        getActivity().runOnUiThread(() -> {
+                            if (finalErrorResponse.isEmpty()) {
+                                Toast.makeText(getContext(), "Fehler beim Hinzufügen (" + finalResponseCode + ")", Toast.LENGTH_SHORT).show();
+                            } else {
+                                Toast.makeText(getContext(), "Fehler (" + finalResponseCode + "): " + finalErrorResponse, Toast.LENGTH_LONG).show();
+                            }
+                        });
                     }
                 }
             } catch (Exception e) {
@@ -2266,6 +2698,11 @@ public class FotosFragment extends Fragment {
 
     private void toggleFavoriteStatus() {
         if (currentViewedAsset == null) return;
+
+        if (currentViewedAsset.isLocalOnly) {
+            Toast.makeText(getContext(), "Dieses Bild ist noch nicht in der Cloud, Favorisieren derzeit nicht möglich.", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         boolean isFav = favoriteAssets.contains(currentViewedAsset.id) || (currentViewedAsset.isFavorite != null && currentViewedAsset.isFavorite);
         boolean newFavStatus = !isFav;
@@ -2363,6 +2800,138 @@ public class FotosFragment extends Fragment {
         } else {
             btnFavorite.setColorFilter(Color.WHITE);
         }
+
+        if (currentViewedAsset.isLocalOnly) {
+            if (btnShareFullscreen != null) btnShareFullscreen.setVisibility(View.GONE);
+            if (btnEditFullscreen != null) btnEditFullscreen.setVisibility(View.GONE);
+            if (btnAddToFullscreen != null) btnAddToFullscreen.setVisibility(View.GONE);
+            if (btnDeleteFullscreen != null) btnDeleteFullscreen.setVisibility(View.GONE);
+            if (btnUploadLocal != null) btnUploadLocal.setVisibility(View.VISIBLE);
+        } else {
+            if (btnShareFullscreen != null) btnShareFullscreen.setVisibility(View.VISIBLE);
+            if (btnEditFullscreen != null) btnEditFullscreen.setVisibility(View.VISIBLE);
+            if (btnAddToFullscreen != null) btnAddToFullscreen.setVisibility(View.VISIBLE);
+            if (btnDeleteFullscreen != null) btnDeleteFullscreen.setVisibility(View.VISIBLE);
+            if (btnUploadLocal != null) btnUploadLocal.setVisibility(View.GONE);
+        }
+    }
+
+    private void uploadSingleAsset(ImmichAsset asset) {
+        if (asset == null || !asset.isLocalOnly || asset.localUri == null) return;
+        if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
+
+        Toast.makeText(getContext(), "Upload startet...", Toast.LENGTH_SHORT).show();
+
+        Executors.newSingleThreadExecutor().execute(() -> {
+            HttpURLConnection conn = null;
+            try {
+                String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
+                URL url = new URL(cleanBaseUrl + "/api/assets");
+                SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+                String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, "android-app");
+
+                String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setUseCaches(false);
+                conn.setDoOutput(true);
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("x-api-key", currentApiKey);
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+
+                OutputStream outputStream = conn.getOutputStream();
+                java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.OutputStreamWriter(outputStream, "UTF-8"), true);
+
+                writer.append("--").append(boundary).append("\r\n");
+                writer.append("Content-Disposition: form-data; name=\"deviceAssetId\"\r\n\r\n");
+                writer.append(asset.deviceAssetId).append("\r\n");
+
+                writer.append("--").append(boundary).append("\r\n");
+                writer.append("Content-Disposition: form-data; name=\"deviceId\"\r\n\r\n");
+                writer.append(deviceId).append("\r\n");
+
+                writer.append("--").append(boundary).append("\r\n");
+                writer.append("Content-Disposition: form-data; name=\"fileCreatedAt\"\r\n\r\n");
+                writer.append(asset.fileCreatedAt).append("\r\n");
+
+                writer.append("--").append(boundary).append("\r\n");
+                writer.append("Content-Disposition: form-data; name=\"fileModifiedAt\"\r\n\r\n");
+                writer.append(asset.fileCreatedAt).append("\r\n");
+
+                writer.append("--").append(boundary).append("\r\n");
+                writer.append("Content-Disposition: form-data; name=\"isFavorite\"\r\n\r\n");
+                writer.append("false").append("\r\n");
+
+                String fileName = asset.originalFileName;
+                if (fileName == null || fileName.isEmpty()) fileName = "upload.jpg";
+                String mimeType = asset.type.equals("VIDEO") ? "video/mp4" : "image/jpeg";
+
+                writer.append("--").append(boundary).append("\r\n");
+                writer.append("Content-Disposition: form-data; name=\"assetData\"; filename=\"").append(fileName).append("\"\r\n");
+                writer.append("Content-Type: ").append(mimeType).append("\r\n\r\n");
+                writer.flush();
+
+                Uri uri = Uri.parse(asset.localUri);
+                InputStream is = getContext().getContentResolver().openInputStream(uri);
+                if (is != null) {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = is.read(buffer)) != -1) {
+                        outputStream.write(buffer, 0, bytesRead);
+                    }
+                    outputStream.flush();
+                    is.close();
+                }
+
+                writer.append("\r\n");
+                writer.append("--").append(boundary).append("--\r\n");
+                writer.close();
+
+                int responseCode = conn.getResponseCode();
+                if (responseCode == 200 || responseCode == 201) {
+                    BufferedReader reader = new BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                    StringBuilder response = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) response.append(line);
+                    reader.close();
+
+                    JsonObject responseObj = JsonParser.parseString(response.toString()).getAsJsonObject();
+                    if (responseObj.has("id")) {
+                        asset.id = responseObj.get("id").getAsString();
+                    }
+
+                    if (getActivity() != null) {
+                        getActivity().runOnUiThread(() -> {
+                            asset.isLocalOnly = false;
+                            localMediaCache.remove(asset);
+                            globalAssetList.add(asset);
+                            updateFullscreenUI();
+                            refreshVisibleGrids();
+                            Toast.makeText(getContext(), "Upload erfolgreich! ☁️➡️✅", Toast.LENGTH_SHORT).show();
+                        });
+                    }
+                } else if (responseCode == 409) {
+                    if (getActivity() != null) {
+                        getActivity().runOnUiThread(() -> {
+                            asset.isLocalOnly = false;
+                            localMediaCache.remove(asset);
+                            updateFullscreenUI();
+                            refreshVisibleGrids();
+                            Toast.makeText(getContext(), "Bild war bereits in der Cloud!", Toast.LENGTH_SHORT).show();
+                        });
+                    }
+                } else {
+                    if (getActivity() != null) {
+                        int finalResponseCode = responseCode;
+                        getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Fehler beim Upload: " + finalResponseCode, Toast.LENGTH_LONG).show());
+                    }
+                }
+            } catch (Exception e) {
+                if (getActivity() != null) getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Netzwerkfehler beim Upload.", Toast.LENGTH_SHORT).show());
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        });
     }
 
     private void setupDescriptionSaver() {
@@ -2371,7 +2940,7 @@ public class FotosFragment extends Fragment {
                 @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
                 @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
                 @Override public void afterTextChanged(Editable s) {
-                    if (isUpdatingDescriptionUI || currentViewedAsset == null) return;
+                    if (isUpdatingDescriptionUI || currentViewedAsset == null || currentViewedAsset.isLocalOnly) return;
 
                     String newDescription = s.toString();
                     localDescriptions.put(currentViewedAsset.id, newDescription);
@@ -2474,7 +3043,7 @@ public class FotosFragment extends Fragment {
     }
 
     private void fetchSingleAssetDetails(String assetId) {
-        if (currentApiUrl.isEmpty() || currentApiKey.isEmpty() || assetId == null) return;
+        if (currentApiUrl.isEmpty() || currentApiKey.isEmpty() || assetId == null || assetId.startsWith("local_")) return;
 
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
@@ -2599,30 +3168,36 @@ public class FotosFragment extends Fragment {
                 else tvDetailLocation.setText("🗺️ Kein Standort");
             }
         } else {
-            if (tvDetailCamera != null) tvDetailCamera.setText("Keine Kamera-Infos");
+            if (tvDetailCamera != null) tvDetailCamera.setText(asset.isLocalOnly ? "Lokal auf Gerät" : "Keine Kamera-Infos");
             if (tvDetailLocation != null) tvDetailLocation.setText("🗺️ Kein Standort");
         }
 
         if (etDetailDescription != null) {
             isUpdatingDescriptionUI = true;
 
-            String savedDescription = localDescriptions.get(asset.id);
-            if (savedDescription != null && !savedDescription.isEmpty()) {
-                etDetailDescription.setText(savedDescription);
+            if (asset.isLocalOnly) {
+                etDetailDescription.setText("Wartet auf Upload in die Cloud ☁️");
+                etDetailDescription.setEnabled(false);
             } else {
-                String desc = asset.description;
-                if ((desc == null || desc.trim().isEmpty()) && asset.exifInfo != null) {
-                    desc = asset.exifInfo.description;
-                    if (desc == null || desc.trim().isEmpty()) {
-                        desc = asset.exifInfo.imageDescription;
-                    }
-                }
-
-                if (desc != null && !desc.trim().isEmpty()) {
-                    etDetailDescription.setText(desc);
-                    localDescriptions.put(asset.id, desc);
+                etDetailDescription.setEnabled(true);
+                String savedDescription = localDescriptions.get(asset.id);
+                if (savedDescription != null && !savedDescription.isEmpty()) {
+                    etDetailDescription.setText(savedDescription);
                 } else {
-                    etDetailDescription.setText("");
+                    String desc = asset.description;
+                    if ((desc == null || desc.trim().isEmpty()) && asset.exifInfo != null) {
+                        desc = asset.exifInfo.description;
+                        if (desc == null || desc.trim().isEmpty()) {
+                            desc = asset.exifInfo.imageDescription;
+                        }
+                    }
+
+                    if (desc != null && !desc.trim().isEmpty()) {
+                        etDetailDescription.setText(desc);
+                        localDescriptions.put(asset.id, desc);
+                    } else {
+                        etDetailDescription.setText("");
+                    }
                 }
             }
 
@@ -2649,7 +3224,6 @@ public class FotosFragment extends Fragment {
         super.onHiddenChanged(hidden);
         if (!hidden) {
             loadAppropriateUrlAndKey();
-            // SAMSUNG FIX: Wir zwingen das Neuladen über die UI-Queue (post), wenn wir im Fotos-Tab sind
             if (!globalAssetList.isEmpty() && recyclerViewFotos != null && "Fotos".equals(activeTab)) {
                 recyclerViewFotos.post(this::refreshVisibleGrids);
             }
@@ -2660,7 +3234,6 @@ public class FotosFragment extends Fragment {
     public void onResume() {
         super.onResume();
         loadAppropriateUrlAndKey();
-        // SAMSUNG FIX: Auch beim Zurückkehren in die App sicher neu zeichnen
         if (!globalAssetList.isEmpty() && recyclerViewFotos != null && "Fotos".equals(activeTab)) {
             recyclerViewFotos.post(this::refreshVisibleGrids);
         }
@@ -2691,10 +3264,11 @@ public class FotosFragment extends Fragment {
                 isLastPage = false;
                 globalAssetList.clear();
                 favoriteAssets.clear();
-                fetchPhotosFromImmich(currentApiUrl, currentApiKey, currentPage);
 
+                loadLocalAssetsAsync();
+
+                fetchPhotosFromImmich(currentApiUrl, currentApiKey, currentPage);
                 syncFavoritesInBackground();
-                // SAMSUNG FIX: Robuste Prüfung über activeTab statt Visibility/Adapter-Null-Check
             } else if (recyclerViewFotos != null && "Fotos".equals(activeTab)) {
                 recyclerViewFotos.post(this::refreshVisibleGrids);
             }
@@ -2814,15 +3388,20 @@ public class FotosFragment extends Fragment {
                             }
                         }
 
-                        if (page == 1) globalAssetList = safeAssets;
-                        else globalAssetList.addAll(safeAssets);
-
                         if (getActivity() != null) {
                             getActivity().runOnUiThread(() -> {
+                                if (page == 1) {
+                                    globalAssetList.clear();
+                                    globalAssetList.addAll(safeAssets);
+                                } else {
+                                    globalAssetList.addAll(safeAssets);
+                                }
+
                                 extractMetadataToCache(safeAssets);
+                                isLoading = false;
+                                if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
                                 if (tvPlaceholder != null) tvPlaceholder.setVisibility(View.GONE);
 
-                                // SAMSUNG FIX: Weg mit isBold(), stattdessen sauber über activeTab und UI-Thread queue (post)
                                 if ("Fotos".equals(activeTab)) {
                                     if (recyclerViewFotos != null) {
                                         recyclerViewFotos.setVisibility(View.VISIBLE);
@@ -2836,22 +3415,20 @@ public class FotosFragment extends Fragment {
                             });
                         }
                     } else {
+                        isLoading = false;
+                        if (getActivity() != null) getActivity().runOnUiThread(() -> { if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false); });
                         if (page == 1) showErrorOnUI("Keine Bilder gefunden.");
                     }
                 } else {
+                    isLoading = false;
+                    if (getActivity() != null) getActivity().runOnUiThread(() -> { if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false); });
                     if (page == 1) showErrorOnUI("Fehler vom Server (" + responseCode + "):\n" + responseText);
                 }
             } catch (Exception e) {
+                isLoading = false;
+                if (getActivity() != null) getActivity().runOnUiThread(() -> { if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false); });
                 if (page == 1) showErrorOnUI("Verbindungsfehler: " + e.getMessage());
             } finally {
-                // SAMSUNG BUGFIX: isLoading IMMER zuverlässig im Hintergrund-Thread zurücksetzen,
-                // damit die App nicht in einer Endlosschleife hängt, falls das Tab gerade versteckt ist!
-                isLoading = false;
-                if (getActivity() != null) {
-                    getActivity().runOnUiThread(() -> {
-                        if (swipeRefreshLayout != null) swipeRefreshLayout.setRefreshing(false);
-                    });
-                }
                 if (conn != null) conn.disconnect();
             }
         });
@@ -2865,7 +3442,46 @@ public class FotosFragment extends Fragment {
             recyclerViewState = targetRecyclerView.getLayoutManager().onSaveInstanceState();
         }
 
-        List<ImmichAsset> sortedAssets = new ArrayList<>(rawListToProcess);
+        List<ImmichAsset> combinedList = new ArrayList<>(rawListToProcess);
+
+        HashSet<String> knownDeviceAssetIds = new HashSet<>();
+        HashSet<String> knownFileNames = new HashSet<>();
+
+        for (ImmichAsset remote : rawListToProcess) {
+            if (remote.deviceAssetId != null) knownDeviceAssetIds.add(remote.deviceAssetId);
+            if (remote.originalFileName != null) {
+                String name = remote.originalFileName;
+                if(name.lastIndexOf(".") > 0) name = name.substring(0, name.lastIndexOf("."));
+                knownFileNames.add(name);
+            }
+        }
+
+        if (globalAssetList != null) {
+            for (ImmichAsset remote : globalAssetList) {
+                if (remote.deviceAssetId != null) knownDeviceAssetIds.add(remote.deviceAssetId);
+                if (remote.originalFileName != null) {
+                    String name = remote.originalFileName;
+                    if(name.lastIndexOf(".") > 0) name = name.substring(0, name.lastIndexOf("."));
+                    knownFileNames.add(name);
+                }
+            }
+        }
+
+        if (targetRecyclerView == recyclerViewFotos) {
+            for (ImmichAsset local : localMediaCache) {
+                String localName = local.originalFileName;
+                if(localName != null && localName.lastIndexOf(".") > 0) localName = localName.substring(0, localName.lastIndexOf("."));
+
+                boolean alreadyUploaded = knownDeviceAssetIds.contains(local.deviceAssetId) ||
+                        (localName != null && knownFileNames.contains(localName));
+
+                if (!alreadyUploaded) {
+                    combinedList.add(local);
+                }
+            }
+        }
+
+        List<ImmichAsset> sortedAssets = new ArrayList<>(combinedList);
         Collections.sort(sortedAssets, (a, b) -> {
             if (a.fileCreatedAt == null || b.fileCreatedAt == null) return 0;
             return b.fileCreatedAt.compareTo(a.fileCreatedAt);
@@ -2920,7 +3536,13 @@ public class FotosFragment extends Fragment {
                     }
                 }
         );
-        targetRecyclerView.swapAdapter(currentFotosAdapter, true);
+
+        if (targetRecyclerView.getAdapter() != null && !(targetRecyclerView.getAdapter() instanceof FotosAdapter)) {
+            targetRecyclerView.getRecycledViewPool().clear();
+            targetRecyclerView.setAdapter(currentFotosAdapter);
+        } else {
+            targetRecyclerView.swapAdapter(currentFotosAdapter, true);
+        }
 
         if (recyclerViewState != null) {
             targetRecyclerView.getLayoutManager().onRestoreInstanceState(recyclerViewState);
@@ -2972,39 +3594,64 @@ public class FotosFragment extends Fragment {
 
             boolean isVideo = asset.type != null && asset.type.equals("VIDEO");
 
-            String imageUrl;
-            if (isVideo) imageUrl = baseUrl + "/api/assets/" + asset.id + "/thumbnail";
-            else imageUrl = baseUrl + "/api/assets/" + asset.id + "/original";
-
-            GlideUrl glideUrl = new GlideUrl(imageUrl, new LazyHeaders.Builder()
-                    .addHeader("x-api-key", apiKey)
-                    .addHeader("Accept", "application/json")
-                    .build());
-
-            Glide.with(context).load(glideUrl).fitCenter().into(holder.imageView);
-
             holder.imageView.setVisibility(View.VISIBLE);
             if (holder.videoView != null) holder.videoView.setVisibility(View.GONE);
 
-            if (isVideo && holder.btnPlay != null) {
-                holder.btnPlay.setVisibility(View.VISIBLE);
-                holder.btnPlay.setOnClickListener(v -> {
-                    holder.imageView.setVisibility(View.GONE);
+            if (asset.isLocalOnly && asset.localUri != null) {
+                Glide.with(context)
+                        .load(Uri.parse(asset.localUri))
+                        .fitCenter()
+                        .into(holder.imageView);
+
+                if (isVideo && holder.btnPlay != null) {
+                    holder.btnPlay.setVisibility(View.VISIBLE);
+                    holder.btnPlay.setOnClickListener(v -> {
+                        holder.imageView.setVisibility(View.GONE);
+                        holder.btnPlay.setVisibility(View.GONE);
+                        if (holder.videoView != null) {
+                            holder.videoView.setVisibility(View.VISIBLE);
+                            holder.videoView.setVideoURI(Uri.parse(asset.localUri));
+                            MediaController mc = new MediaController(context);
+                            mc.setAnchorView(holder.videoView);
+                            holder.videoView.setMediaController(mc);
+                            holder.videoView.start();
+                        }
+                    });
+                } else if (holder.btnPlay != null) {
                     holder.btnPlay.setVisibility(View.GONE);
-                    if (holder.videoView != null) {
-                        holder.videoView.setVisibility(View.VISIBLE);
-                        String videoUrl = baseUrl + "/api/assets/" + asset.id + "/original";
-                        Map<String, String> headers = new HashMap<>();
-                        headers.put("x-api-key", apiKey);
-                        holder.videoView.setVideoURI(Uri.parse(videoUrl), headers);
-                        MediaController mc = new MediaController(context);
-                        mc.setAnchorView(holder.videoView);
-                        holder.videoView.setMediaController(mc);
-                        holder.videoView.start();
-                    }
-                });
-            } else if (holder.btnPlay != null) {
-                holder.btnPlay.setVisibility(View.GONE);
+                }
+            } else {
+                String imageUrl;
+                if (isVideo) imageUrl = baseUrl + "/api/assets/" + asset.id + "/thumbnail";
+                else imageUrl = baseUrl + "/api/assets/" + asset.id + "/original";
+
+                GlideUrl glideUrl = new GlideUrl(imageUrl, new LazyHeaders.Builder()
+                        .addHeader("x-api-key", apiKey)
+                        .addHeader("Accept", "application/json")
+                        .build());
+
+                Glide.with(context).load(glideUrl).fitCenter().into(holder.imageView);
+
+                if (isVideo && holder.btnPlay != null) {
+                    holder.btnPlay.setVisibility(View.VISIBLE);
+                    holder.btnPlay.setOnClickListener(v -> {
+                        holder.imageView.setVisibility(View.GONE);
+                        holder.btnPlay.setVisibility(View.GONE);
+                        if (holder.videoView != null) {
+                            holder.videoView.setVisibility(View.VISIBLE);
+                            String videoUrl = baseUrl + "/api/assets/" + asset.id + "/original";
+                            Map<String, String> headers = new HashMap<>();
+                            headers.put("x-api-key", apiKey);
+                            holder.videoView.setVideoURI(Uri.parse(videoUrl), headers);
+                            MediaController mc = new MediaController(context);
+                            mc.setAnchorView(holder.videoView);
+                            holder.videoView.setMediaController(mc);
+                            holder.videoView.start();
+                        }
+                    });
+                } else if (holder.btnPlay != null) {
+                    holder.btnPlay.setVisibility(View.GONE);
+                }
             }
 
             holder.imageView.setOnSingleFlingListener((MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) -> {

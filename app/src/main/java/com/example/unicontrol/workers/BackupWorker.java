@@ -99,7 +99,6 @@ public class BackupWorker extends Worker {
         }
     }
 
-    // --- NEU: Berechnet den SHA-1 Checksum für die Immich Vorab-Prüfung ---
     private String computeSha1(Context context, Uri uri) {
         try (InputStream is = context.getContentResolver().openInputStream(uri)) {
             if (is == null) return null;
@@ -121,7 +120,6 @@ public class BackupWorker extends Worker {
         }
     }
 
-    // Lädt die Datei hoch und gibt den HTTP-Code zurück (201 = Neu, 409 = Bereits vorhanden)
     private int tryUploadReturnCode(Context context, String uploadUrlStr, String apiKey, String deviceId, UploadItem item) {
         HttpURLConnection conn = null;
         try {
@@ -217,10 +215,9 @@ public class BackupWorker extends Worker {
         }
     }
 
-    // --- NEU ANGEPASST: Vorab-Check inklusive SHA-1 Checksum! ---
     private List<UploadItem> filterExistingAssets(String baseUrl, String apiKey, List<UploadItem> allItems) {
         List<UploadItem> itemsToUpload = new ArrayList<>();
-        int chunkSize = 250; // Kleinerer Chunk, weil JSON mit Checksums größer wird
+        int chunkSize = 250;
 
         for (int i = 0; i < allItems.size(); i += chunkSize) {
             int end = Math.min(allItems.size(), i + chunkSize);
@@ -290,7 +287,6 @@ public class BackupWorker extends Worker {
                         for (JsonElement element : results) {
                             JsonObject resObj = element.getAsJsonObject();
                             String action = resObj.get("action").getAsString();
-                            // Immich liefert "accept" wenn das Bild hochgeladen werden muss, "reject" wenn es schon existiert
                             if ("accept".equalsIgnoreCase(action)) {
                                 acceptedIds.add(resObj.get("id").getAsString());
                             }
@@ -347,6 +343,9 @@ public class BackupWorker extends Worker {
             String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, UUID.randomUUID().toString());
             String currentSsid = NetworkUtils.getCurrentSsid(context);
 
+            // NEU: Wir laden die Ignorier-Liste, die du durch das Löschen in der App befüllst
+            Set<String> blacklist = prefs.getStringSet("blacklisted_local_assets", new HashSet<>());
+
             String targetUrl = "";
             if (!savedSsid.isEmpty() && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) {
                 targetUrl = formatUrl(localUrl, true);
@@ -364,7 +363,6 @@ public class BackupWorker extends Worker {
 
             final String cleanBaseUrl = targetUrl.endsWith("/") ? targetUrl.substring(0, targetUrl.length() - 1) : targetUrl;
 
-            // 1. Bilder zusammensuchen
             List<UploadItem> itemsToUpload = new ArrayList<>();
             Uri[] uris = { MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI };
             String[] projection = { MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.BUCKET_ID };
@@ -388,8 +386,16 @@ public class BackupWorker extends Worker {
                         int dateColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED);
 
                         while (cursor.moveToNext()) {
+                            String _id = cursor.getString(idColumn);
+
+                            // NEU: Wenn das Bild auf deiner persönlichen Blacklist steht,
+                            // dann wird es nicht mal als Kandidat für das Backup in Betracht gezogen!
+                            if (blacklist.contains(_id)) {
+                                continue;
+                            }
+
                             UploadItem item = new UploadItem();
-                            item.deviceAssetId = cursor.getString(idColumn);
+                            item.deviceAssetId = _id;
                             item.path = cursor.getString(dataColumn);
                             item.dateAddedMs = cursor.getLong(dateColumn) * 1000L;
                             item.contentUri = ContentUris.withAppendedId(uri, cursor.getLong(idColumn));
@@ -408,28 +414,20 @@ public class BackupWorker extends Worker {
 
             Log.d("UniControlBackup", "Lokal gefunden: " + itemsToUpload.size() + " Bilder/Videos. Berechne Prüfsummen...");
 
-            // 2. NEU: SHA-1 Checksums berechnen (erforderlich für den Turbo-Modus!)
             int totalItems = itemsToUpload.size();
             for (int i = 0; i < totalItems; i++) {
                 UploadItem item = itemsToUpload.get(i);
-
-                // Wir aktualisieren die Benachrichtigung, damit du siehst, dass er rechnet
-                if (i % 25 == 0 || i == totalItems - 1) {
-                    updateNotification("Analysiere Dateien... (" + (i + 1) + " von " + totalItems + ")");
-                }
-
+                if (i % 25 == 0 || i == totalItems - 1) updateNotification("Analysiere Dateien... (" + (i + 1) + " von " + totalItems + ")");
                 item.checksum = computeSha1(context, item.contentUri);
             }
 
-            // 3. PRE-CHECK: Server fragen, welche Bilder schon da sind (TURBO-MODUS)
             List<UploadItem> filteredItems = filterExistingAssets(cleanBaseUrl, apiKey, itemsToUpload);
 
             Log.d("UniControlBackup", "Vorab-Prüfung abgeschlossen. Neue Dateien zum Upload: " + filteredItems.size());
 
-            // 4. Den eigentlichen Upload abarbeiten
             int totalNewCount = filteredItems.size();
             int newUploadsCount = 0;
-            int skippedCount = totalItems - totalNewCount; // Alles, was durch den Turbo-Check direkt aussortiert wurde!
+            int skippedCount = totalItems - totalNewCount;
 
             for (int i = 0; i < totalNewCount; i++) {
                 UploadItem item = filteredItems.get(i);
@@ -443,14 +441,12 @@ public class BackupWorker extends Worker {
                 if (code == 200 || code == 201) {
                     newUploadsCount++;
                 } else if (code == 409) {
-                    // Fallback-Zählung, falls der Pre-Check mal etwas verpasst haben sollte
                     skippedCount++;
                 }
             }
 
             Log.d("UniControlBackup", "Hintergrund-Backup Job erfolgreich abgeschlossen!");
 
-            // --- MANUELLES FEEDBACK ---
             if (isManual) {
                 showToast("Backup beendet!\n" + newUploadsCount + " neu hochgeladen\n" + skippedCount + " übersprungen 🚀");
             }
@@ -524,6 +520,6 @@ public class BackupWorker extends Worker {
         String path;
         long dateAddedMs;
         Uri contentUri;
-        String checksum; // Erforderlich für den neuen Immich Turbo-Check
+        String checksum;
     }
 }

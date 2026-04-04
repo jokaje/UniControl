@@ -2,6 +2,7 @@ package com.example.unicontrol.adapters;
 
 import android.content.Context;
 import android.graphics.Color;
+import android.net.Uri;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -114,18 +115,34 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
             ((DayHeaderViewHolder) holder).tvDay.setText(item.title);
         } else if (holder instanceof FotoViewHolder) {
             ImmichAsset asset = item.asset;
-            String thumbnailUrl = baseUrl + "/api/assets/" + asset.id + "/thumbnail";
-
-            GlideUrl glideUrl = new GlideUrl(thumbnailUrl, new LazyHeaders.Builder()
-                    .addHeader("x-api-key", apiKey)
-                    .addHeader("Accept", "application/json")
-                    .build());
-
             FotoViewHolder fotoHolder = (FotoViewHolder) holder;
-            Glide.with(context)
-                    .load(glideUrl)
-                    .centerCrop()
-                    .into(fotoHolder.imageView);
+
+            // --- NEU: Fallunterscheidung Lokal vs. Cloud ---
+            if (asset.isLocalOnly && asset.localUri != null) {
+                // Bild direkt vom Handy laden
+                Glide.with(context)
+                        .load(Uri.parse(asset.localUri))
+                        .centerCrop()
+                        .into(fotoHolder.imageView);
+
+                // Wölkchen-Icon für ausstehenden Upload einblenden
+                fotoHolder.iconPending.setVisibility(View.VISIBLE);
+            } else {
+                // Bild regulär über die API aus der Cloud laden
+                String thumbnailUrl = baseUrl + "/api/assets/" + asset.id + "/thumbnail";
+                GlideUrl glideUrl = new GlideUrl(thumbnailUrl, new LazyHeaders.Builder()
+                        .addHeader("x-api-key", apiKey)
+                        .addHeader("Accept", "application/json")
+                        .build());
+
+                Glide.with(context)
+                        .load(glideUrl)
+                        .centerCrop()
+                        .into(fotoHolder.imageView);
+
+                // Wölkchen ausblenden (Bild ist ja schon online)
+                fotoHolder.iconPending.setVisibility(View.GONE);
+            }
 
             if (asset.type != null && asset.type.equals("VIDEO")) {
                 fotoHolder.iconPlay.setVisibility(View.VISIBLE);
@@ -194,13 +211,15 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
     public static class FotoViewHolder extends RecyclerView.ViewHolder {
         ImageView imageView;
         ImageView iconPlay;
-        TextView iconSelected; // KORRIGIERT: Ist jetzt ein TextView, passend zur XML!
+        TextView iconSelected;
+        ImageView iconPending; // NEU
 
         public FotoViewHolder(@NonNull View itemView) {
             super(itemView);
             imageView = itemView.findViewById(R.id.image_view_foto);
             iconPlay = itemView.findViewById(R.id.icon_play_video);
             iconSelected = itemView.findViewById(R.id.icon_selected);
+            iconPending = itemView.findViewById(R.id.icon_pending_upload);
         }
     }
 }
