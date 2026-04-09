@@ -9,6 +9,8 @@ import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -20,12 +22,12 @@ import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.Log;
-import android.view.GestureDetector;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
@@ -45,8 +47,11 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+import androidx.core.graphics.ColorUtils;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.viewpager2.widget.ViewPager2;
@@ -57,15 +62,18 @@ import com.bumptech.glide.load.model.LazyHeaders;
 import com.example.unicontrol.R;
 import com.example.unicontrol.adapters.AlbumAdapter;
 import com.example.unicontrol.adapters.FotosAdapter;
+import com.example.unicontrol.adapters.MemoriesAdapter;
 import com.example.unicontrol.adapters.PersonAdapter;
 import com.example.unicontrol.models.GalleryItem;
 import com.example.unicontrol.models.ImmichAlbum;
 import com.example.unicontrol.models.ImmichAsset;
+import com.example.unicontrol.models.ImmichMemory;
 import com.example.unicontrol.models.ImmichPerson;
 import com.example.unicontrol.utils.NetworkUtils;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.textfield.TextInputLayout;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -76,7 +84,6 @@ import com.google.gson.reflect.TypeToken;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -100,6 +107,9 @@ public class FotosFragment extends Fragment {
 
     private SwipeRefreshLayout swipeRefreshLayout;
     private RecyclerView recyclerViewFotos;
+
+    private RecyclerView recyclerViewMemories;
+    private View layoutFotosMain;
 
     private View layoutSearch;
     private View layoutSearchCategories;
@@ -148,20 +158,24 @@ public class FotosFragment extends Fragment {
     private String activeTab = "Fotos";
 
     private List<ImmichAsset> lastSearchResults = new ArrayList<>();
-    private int lastSearchMode = -1; // 0=Fav, 1=Archiv, 2=Tresor, 3=Normal, 4=Smart
+    private int lastSearchMode = -1;
 
-    // --- NEU: Wir merken uns, in welchem Album wir uns gerade befinden ---
     private String currentViewedAlbumId = null;
-
     private ImmichAsset currentViewedAsset = null;
 
     private HashMap<String, String> localDescriptions = new HashMap<>();
     private HashSet<String> favoriteAssets = new HashSet<>();
+    private HashMap<String, String> displayToOriginalLocationMap = new HashMap<>();
 
     private Handler descriptionHandler = new Handler(Looper.getMainLooper());
     private Runnable descriptionRunnable;
     private boolean isUpdatingDescriptionUI = false;
     private ViewPager2.OnPageChangeCallback pageChangeCallback;
+
+    // --- NEU: Timer & Handler für die Auto-Play Story Funktion ---
+    private Handler storyAutoPlayHandler = new Handler(Looper.getMainLooper());
+    private Runnable storyAutoPlayRunnable;
+    private boolean isStoryModeActive = false;
 
     private int currentPage = 1;
     private boolean isLoading = false;
@@ -178,6 +192,11 @@ public class FotosFragment extends Fragment {
         if (getContext() == null) return Color.parseColor("#F49AC2");
         SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
         String colorStr = prefs.getString(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2");
+
+        if (colorStr != null && !colorStr.startsWith("#")) {
+            colorStr = "#" + colorStr;
+        }
+
         try {
             return Color.parseColor(colorStr);
         } catch (Exception e) {
@@ -185,11 +204,61 @@ public class FotosFragment extends Fragment {
         }
     }
 
+    private boolean isThemeDark() {
+        return ColorUtils.calculateLuminance(getThemeColor()) < 0.5;
+    }
+
+    private int getUnselectedTabColor() {
+        return isThemeDark() ? Color.parseColor("#B0B0B0") : Color.parseColor("#555555");
+    }
+
+    private int getPillHighlightColor() {
+        int baseColor = getThemeColor();
+        float[] hsv = new float[3];
+        Color.colorToHSV(baseColor, hsv);
+
+        if (isThemeDark()) {
+            hsv[2] = Math.min(1.0f, hsv[2] + 0.15f);
+        } else {
+            hsv[2] = Math.max(0.0f, hsv[2] - 0.10f);
+        }
+        return Color.HSVToColor(hsv);
+    }
+
+    private Drawable getThemedPillDrawable() {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setShape(GradientDrawable.RECTANGLE);
+        if (getContext() != null) {
+            drawable.setCornerRadius(20f * getContext().getResources().getDisplayMetrics().density);
+        } else {
+            drawable.setCornerRadius(60f);
+        }
+        drawable.setColor(getPillHighlightColor());
+        return drawable;
+    }
+
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
         view.setBackgroundColor(getThemeColor());
+
+        if (getActivity() != null && getActivity().getWindow() != null) {
+            WindowInsetsControllerCompat windowInsetsController = new WindowInsetsControllerCompat(getActivity().getWindow(), view);
+            windowInsetsController.setAppearanceLightStatusBars(!isThemeDark());
+        }
+
+        View topTabs = view.findViewById(R.id.layout_top_tabs);
+        if (topTabs != null) {
+            topTabs.setBackgroundColor(Color.TRANSPARENT);
+        }
+
+        layoutFotosMain = view.findViewById(R.id.layout_fotos_main);
+
+        recyclerViewMemories = view.findViewById(R.id.recycler_view_memories);
+        if (recyclerViewMemories != null) {
+            recyclerViewMemories.setLayoutManager(new LinearLayoutManager(getContext(), LinearLayoutManager.HORIZONTAL, false));
+        }
 
         recyclerViewFotos = view.findViewById(R.id.recycler_view_fotos);
         swipeRefreshLayout = view.findViewById(R.id.swipe_refresh_layout);
@@ -203,6 +272,7 @@ public class FotosFragment extends Fragment {
                     syncFavoritesInBackground();
                     loadLocalAssetsAsync();
                     fetchPhotosFromImmich(currentApiUrl, currentApiKey, currentPage);
+                    fetchMemories();
                 } else {
                     swipeRefreshLayout.setRefreshing(false);
                 }
@@ -232,22 +302,34 @@ public class FotosFragment extends Fragment {
 
         if (layoutSelectionBar != null) layoutSelectionBar.setBackgroundColor(getThemeColor());
 
+        if (layoutSelectionBottomBar != null) {
+            layoutSelectionBottomBar.setBackgroundColor(isThemeDark() ? Color.parseColor("#1E1E1E") : Color.WHITE);
+        }
+        int bottomIconColor = isThemeDark() ? Color.WHITE : Color.parseColor("#555555");
+        if (btnSelectionShare != null) btnSelectionShare.setColorFilter(bottomIconColor);
+        if (btnSelectionAddTo != null) btnSelectionAddTo.setColorFilter(bottomIconColor);
+        if (btnSelectionDelete != null) btnSelectionDelete.setColorFilter(bottomIconColor);
+
         layoutSearch = view.findViewById(R.id.layout_search);
         layoutSearchCategories = view.findViewById(R.id.layout_search_categories);
         layoutSearchBottomButtons = view.findViewById(R.id.layout_search_bottom_buttons);
         etSearchInput = view.findViewById(R.id.et_search_input);
         tvSearchLoading = view.findViewById(R.id.tv_search_loading);
+        if (tvSearchLoading != null) tvSearchLoading.setTextColor(getUnselectedTabColor());
         recyclerViewSearch = view.findViewById(R.id.recycler_view_search);
 
         layoutAlbums = view.findViewById(R.id.layout_albums);
         etAlbumSearch = view.findViewById(R.id.et_album_search);
         tvAlbumsLoading = view.findViewById(R.id.tv_albums_loading);
+        if (tvAlbumsLoading != null) tvAlbumsLoading.setTextColor(getUnselectedTabColor());
+
         recyclerViewAlbums = view.findViewById(R.id.recycler_view_albums);
         recyclerViewAlbums.setLayoutManager(new GridLayoutManager(getContext(), 2));
 
         layoutLibrary = view.findViewById(R.id.layout_library);
 
         tvPlaceholder = view.findViewById(R.id.tv_fotos_placeholder);
+        if (tvPlaceholder != null) tvPlaceholder.setTextColor(getUnselectedTabColor());
 
         fullscreenOverlay = view.findViewById(R.id.fullscreen_overlay);
         viewPagerFullscreen = view.findViewById(R.id.view_pager_fullscreen);
@@ -814,14 +896,12 @@ public class FotosFragment extends Fragment {
         if (etSearchInput != null) etSearchInput.setVisibility(View.GONE);
         if (layoutSearch != null) layoutSearch.setVisibility(View.VISIBLE);
 
-        // NEU: ScrollView komplett verstecken, damit die Bildliste den vollen Platz & RAM nutzen darf!
         View scrollableMenus = getView() != null ? getView().findViewById(R.id.layout_search_scrollable_menus) : null;
         if (scrollableMenus != null) scrollableMenus.setVisibility(View.GONE);
     }
 
     private void prepareForSearchResults() {
         hideAllMenusForSearch();
-        // NEU: Sobald wir das Album verlassen, setzen wir die ID wieder zurück!
         currentViewedAlbumId = null;
     }
 
@@ -1039,7 +1119,6 @@ public class FotosFragment extends Fragment {
         if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
 
         prepareForSearchResults();
-        // NEU: Wir merken uns die ID, damit wir später Bilder genau hieraus löschen können!
         currentViewedAlbumId = albumId;
 
         recyclerViewSearch.setVisibility(View.GONE);
@@ -1143,7 +1222,7 @@ public class FotosFragment extends Fragment {
                     tvPlaceholder.setVisibility(View.VISIBLE);
                     tvPlaceholder.setText(errorMessage);
                 }
-                if (recyclerViewFotos != null) recyclerViewFotos.setVisibility(View.GONE);
+                if (layoutFotosMain != null) layoutFotosMain.setVisibility(View.GONE);
                 if (layoutSearch != null) layoutSearch.setVisibility(View.GONE);
                 if (layoutAlbums != null) layoutAlbums.setVisibility(View.GONE);
                 if (layoutLibrary != null) layoutLibrary.setVisibility(View.GONE);
@@ -1155,7 +1234,6 @@ public class FotosFragment extends Fragment {
         if (getContext() == null) return;
 
         activeTab = tabName;
-        // NEU: Beim Tab-Wechsel setzen wir das Album zurück
         currentViewedAlbumId = null;
 
         if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
@@ -1164,19 +1242,20 @@ public class FotosFragment extends Fragment {
         for (TextView tab : allTabs) {
             if (tab != null) {
                 tab.setBackground(null);
-                tab.setTextColor(Color.parseColor("#555555"));
+                tab.setTextColor(getUnselectedTabColor());
                 tab.setTypeface(null, Typeface.NORMAL);
             }
         }
         if (selectedTab != null) {
-            selectedTab.setBackground(ContextCompat.getDrawable(getContext(), R.drawable.bg_pill_selected));
-            selectedTab.setTextColor(Color.WHITE);
+            selectedTab.setBackground(getThemedPillDrawable());
+            boolean isPillDark = ColorUtils.calculateLuminance(getPillHighlightColor()) < 0.5;
+            selectedTab.setTextColor(isPillDark ? Color.WHITE : Color.parseColor("#333333"));
             selectedTab.setTypeface(null, Typeface.BOLD);
         }
 
-        if (layoutSearch == null || recyclerViewFotos == null || layoutAlbums == null || layoutLibrary == null || tvPlaceholder == null) return;
+        if (layoutSearch == null || layoutFotosMain == null || layoutAlbums == null || layoutLibrary == null || tvPlaceholder == null) return;
 
-        recyclerViewFotos.setVisibility(View.GONE);
+        layoutFotosMain.setVisibility(View.GONE);
         layoutSearch.setVisibility(View.GONE);
         layoutAlbums.setVisibility(View.GONE);
         layoutLibrary.setVisibility(View.GONE);
@@ -1184,13 +1263,12 @@ public class FotosFragment extends Fragment {
         if (recyclerViewSearch != null) recyclerViewSearch.setVisibility(View.GONE);
 
         if (tabName.equals("Fotos")) {
-            recyclerViewFotos.setVisibility(View.VISIBLE);
+            layoutFotosMain.setVisibility(View.VISIBLE);
             hideKeyboard();
             tvPlaceholder.setVisibility(globalAssetList == null || globalAssetList.isEmpty() ? View.VISIBLE : View.GONE);
         } else if (tabName.equals("Suche")) {
             layoutSearch.setVisibility(View.VISIBLE);
 
-            // NEU: Menüs wieder einblenden, wenn der User den Tab anklickt
             View scrollableMenus = getView() != null ? getView().findViewById(R.id.layout_search_scrollable_menus) : null;
             if (scrollableMenus != null) scrollableMenus.setVisibility(View.VISIBLE);
 
@@ -1487,7 +1565,7 @@ public class FotosFragment extends Fragment {
         MaterialButton btnApply = new MaterialButton(getContext());
         btnApply.setText("Fertig");
         btnApply.setTextColor(Color.WHITE);
-        btnApply.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#8CA8B3")));
+        btnApply.setBackgroundTintList(android.content.res.ColorStateList.valueOf(getPillHighlightColor()));
         btnApply.setCornerRadius(60);
 
         LinearLayout.LayoutParams paramsBtn = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1503,7 +1581,7 @@ public class FotosFragment extends Fragment {
             optLast3Months.setTextColor(Color.parseColor("#333333"));
             optLast9Months.setTextColor(Color.parseColor("#333333"));
 
-            v.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#8CA8B3")));
+            v.setBackgroundTintList(android.content.res.ColorStateList.valueOf(getPillHighlightColor()));
             ((TextView)v).setTextColor(Color.WHITE);
 
             if (v == optLastMonth) selectedMode[0] = "last_1";
@@ -1583,7 +1661,6 @@ public class FotosFragment extends Fragment {
                 return;
             }
 
-            // Für Custom Freitext-Suchen leiten wir das an die clevere Immich KI weiter
             if (selectedMode[0].equals("custom")) {
                 if (etSearchInput != null) {
                     etSearchInput.setText(finalQuery);
@@ -1595,7 +1672,6 @@ public class FotosFragment extends Fragment {
                 return;
             }
 
-            // --- FIX: Für harte Daten nutzen wir ab sofort 'takenAfter' (Aufnahmedatum) statt 'createdAfter' (Upload-Datum) ---
             JsonObject json = new JsonObject();
             json.addProperty("withExif", true);
             json.addProperty("size", 1000);
@@ -1631,9 +1707,8 @@ public class FotosFragment extends Fragment {
         dialog.show();
     }
 
-    // --- NEU: Aufgeräumte Ortssuche ohne nervige Vorschläge und ohne Zusatztext ---
     private void showLocationFilterBottomSheet() {
-        if (getContext() == null) return; // globalAssetList Check entfernt!
+        if (getContext() == null) return;
 
         BottomSheetDialog dialog = new BottomSheetDialog(getContext());
         View sheetView = LayoutInflater.from(getContext()).inflate(R.layout.bottom_sheet_location_filter, null);
@@ -1649,10 +1724,29 @@ public class FotosFragment extends Fragment {
         MaterialButton btnClear = sheetView.findViewById(R.id.btn_clear_location);
         MaterialButton btnApply = sheetView.findViewById(R.id.btn_apply_location);
 
-        // --- NEU: Cleane Textfelder, der Nutzer darf absolut alles frei eintippen! ---
-        actvCountry.setHint("🌍 Land (z.B. Deutschland)");
-        actvState.setHint("🗺️ Bundesland (z.B. Bayern)");
-        actvCity.setHint("🏙️ Stadt (z.B. Schopfheim)");
+        if (btnApply != null) {
+            btnApply.setBackgroundTintList(ColorStateList.valueOf(getPillHighlightColor()));
+        }
+
+        fixDropdownLabel(actvCountry);
+        fixDropdownLabel(actvState);
+        fixDropdownLabel(actvCity);
+
+        actvCountry.setInputType(InputType.TYPE_NULL);
+        actvState.setInputType(InputType.TYPE_NULL);
+        actvCity.setInputType(InputType.TYPE_NULL);
+
+        View.OnTouchListener dropdownTouchListener = (v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_UP) {
+                ((AutoCompleteTextView)v).showDropDown();
+            }
+            return false;
+        };
+        actvCountry.setOnTouchListener(dropdownTouchListener);
+        actvState.setOnTouchListener(dropdownTouchListener);
+        actvCity.setOnTouchListener(dropdownTouchListener);
+
+        fetchLocationsForDropdowns(actvCountry, actvState, actvCity);
 
         btnClear.setOnClickListener(v -> {
             actvCountry.setText("", false);
@@ -1661,19 +1755,255 @@ public class FotosFragment extends Fragment {
             actvCountry.clearFocus();
             actvState.clearFocus();
             actvCity.clearFocus();
+            fetchLocationsForDropdowns(actvCountry, actvState, actvCity);
         });
 
         btnApply.setOnClickListener(v -> {
-            String selectedCountry = actvCountry.getText().toString().trim();
-            String selectedState = actvState.getText().toString().trim();
-            String selectedCity = actvCity.getText().toString().trim();
+            String selectedCountryDe = actvCountry.getText().toString().trim();
+            String selectedStateDe = actvState.getText().toString().trim();
+            String selectedCityDe = actvCity.getText().toString().trim();
+
+            String originalCountry = displayToOriginalLocationMap.getOrDefault(selectedCountryDe, selectedCountryDe);
+            String originalState = displayToOriginalLocationMap.getOrDefault(selectedStateDe, selectedStateDe);
+            String originalCity = displayToOriginalLocationMap.getOrDefault(selectedCityDe, selectedCityDe);
 
             hideKeyboard();
-            applyCloudLocationFilter(selectedCountry, selectedState, selectedCity);
+            applyCloudLocationFilter(originalCountry, originalState, originalCity);
             dialog.dismiss();
         });
 
         dialog.show();
+    }
+
+    private void fixDropdownLabel(AutoCompleteTextView actv) {
+        if (actv == null) return;
+        ViewParent parent = actv.getParent();
+        if (parent != null && parent.getParent() instanceof TextInputLayout) {
+            ((TextInputLayout) parent.getParent()).setExpandedHintEnabled(false);
+        } else if (parent instanceof TextInputLayout) {
+            ((TextInputLayout) parent).setExpandedHintEnabled(false);
+        }
+    }
+
+    private void fetchLocationsForDropdowns(AutoCompleteTextView actvCountry, AutoCompleteTextView actvState, AutoCompleteTextView actvCity) {
+        if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
+
+        if (getActivity() != null) {
+            getActivity().runOnUiThread(() -> {
+                actvCountry.setHint("⏳ Lade Orte...");
+                actvState.setHint("⏳ Lade Orte...");
+                actvCity.setHint("⏳ Lade Orte...");
+            });
+        }
+
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
+                URL url = new URL(cleanBaseUrl + "/api/search/cities");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty("x-api-key", currentApiKey);
+                conn.setRequestProperty("Accept", "application/json");
+
+                int responseCode = conn.getResponseCode();
+
+                if (responseCode == 200 || responseCode == 201) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    StringBuilder response = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) response.append(line);
+                    reader.close();
+
+                    JsonElement root = JsonParser.parseString(response.toString());
+                    if (root.isJsonArray()) {
+                        JsonArray assets = root.getAsJsonArray();
+
+                        HashMap<String, HashMap<String, HashSet<String>>> locationMap = new HashMap<>();
+                        HashSet<String> allCountries = new HashSet<>();
+                        HashSet<String> allStates = new HashSet<>();
+                        HashSet<String> allCities = new HashSet<>();
+
+                        for (JsonElement element : assets) {
+                            if (element.isJsonObject()) {
+                                JsonObject asset = element.getAsJsonObject();
+                                if (asset.has("exifInfo") && !asset.get("exifInfo").isJsonNull()) {
+                                    JsonObject exif = asset.getAsJsonObject("exifInfo");
+
+                                    String origCountry = exif.has("country") && !exif.get("country").isJsonNull() ? exif.get("country").getAsString().trim() : "";
+                                    String origState = exif.has("state") && !exif.get("state").isJsonNull() ? exif.get("state").getAsString().trim() : "";
+                                    String origCity = exif.has("city") && !exif.get("city").isJsonNull() ? exif.get("city").getAsString().trim() : "";
+
+                                    String country = translateLocationToGerman(origCountry);
+                                    String state = translateLocationToGerman(origState);
+                                    String city = translateLocationToGerman(origCity);
+
+                                    if (!origCountry.isEmpty()) displayToOriginalLocationMap.put(country, origCountry);
+                                    if (!origState.isEmpty()) displayToOriginalLocationMap.put(state, origState);
+                                    if (!origCity.isEmpty()) displayToOriginalLocationMap.put(city, origCity);
+
+                                    if (!country.isEmpty()) allCountries.add(country);
+                                    if (!state.isEmpty()) allStates.add(state);
+                                    if (!city.isEmpty()) allCities.add(city);
+
+                                    if (!country.isEmpty()) {
+                                        locationMap.putIfAbsent(country, new HashMap<>());
+                                        if (!state.isEmpty()) {
+                                            locationMap.get(country).putIfAbsent(state, new HashSet<>());
+                                            if (!city.isEmpty()) {
+                                                locationMap.get(country).get(state).add(city);
+                                            }
+                                        } else if (!city.isEmpty()) {
+                                            locationMap.get(country).putIfAbsent("", new HashSet<>());
+                                            locationMap.get(country).get("").add(city);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (getActivity() != null) {
+                            getActivity().runOnUiThread(() -> {
+                                actvCountry.setHint("🌍 Land");
+                                actvState.setHint("🗺️ Bundesland");
+                                actvCity.setHint("🏙️ Stadt");
+                                setupLocationDropdowns(locationMap, allCountries, allStates, allCities, actvCountry, actvState, actvCity);
+                            });
+                        }
+                    }
+                } else {
+                    if (getActivity() != null) getActivity().runOnUiThread(() -> {
+                        actvCountry.setHint("❌ Fehler (" + responseCode + ")");
+                        actvState.setHint("🗺️ Bundesland");
+                        actvCity.setHint("🏙️ Stadt");
+                    });
+                }
+            } catch (Exception e) {
+                if (getActivity() != null) getActivity().runOnUiThread(() -> {
+                    actvCountry.setHint("❌ Verbindungsfehler");
+                    actvState.setHint("🗺️ Bundesland");
+                    actvCity.setHint("🏙️ Stadt");
+                });
+            }
+        });
+    }
+
+    private void setupLocationDropdowns(
+            HashMap<String, HashMap<String, HashSet<String>>> locationMap,
+            HashSet<String> allCountries, HashSet<String> allStates, HashSet<String> allCities,
+            AutoCompleteTextView actvCountry, AutoCompleteTextView actvState, AutoCompleteTextView actvCity) {
+
+        if (getContext() == null) return;
+
+        List<String> countryList = new ArrayList<>(allCountries);
+        Collections.sort(countryList);
+        List<String> stateList = new ArrayList<>(allStates);
+        Collections.sort(stateList);
+        List<String> cityList = new ArrayList<>(allCities);
+        Collections.sort(cityList);
+
+        ArrayAdapter<String> countryAdapter = getDarkTextAdapter(getContext(), countryList);
+        ArrayAdapter<String> stateAdapter = getDarkTextAdapter(getContext(), stateList);
+        ArrayAdapter<String> cityAdapter = getDarkTextAdapter(getContext(), cityList);
+
+        actvCountry.setAdapter(countryAdapter);
+        actvState.setAdapter(stateAdapter);
+        actvCity.setAdapter(cityAdapter);
+
+        actvCountry.setOnItemClickListener((parent, view, position, id) -> {
+            String selectedCountry = countryAdapter.getItem(position);
+            if (selectedCountry != null && locationMap.containsKey(selectedCountry)) {
+                HashMap<String, HashSet<String>> statesMap = locationMap.get(selectedCountry);
+
+                HashSet<String> filteredStatesSet = new HashSet<>(statesMap.keySet());
+                filteredStatesSet.remove("");
+                List<String> filteredStates = new ArrayList<>(filteredStatesSet);
+                Collections.sort(filteredStates);
+                actvState.setAdapter(getDarkTextAdapter(getContext(), filteredStates));
+
+                HashSet<String> filteredCitiesSet = new HashSet<>();
+                for (HashSet<String> cities : statesMap.values()) {
+                    filteredCitiesSet.addAll(cities);
+                }
+                List<String> filteredCities = new ArrayList<>(filteredCitiesSet);
+                Collections.sort(filteredCities);
+                actvCity.setAdapter(getDarkTextAdapter(getContext(), filteredCities));
+
+                actvState.setText("", false);
+                actvCity.setText("", false);
+            }
+        });
+
+        actvState.setOnItemClickListener((parent, view, position, id) -> {
+            String selectedCountry = actvCountry.getText().toString();
+            String selectedState = (String) parent.getItemAtPosition(position);
+
+            if (!selectedCountry.isEmpty() && locationMap.containsKey(selectedCountry)) {
+                HashSet<String> cities = locationMap.get(selectedCountry).get(selectedState);
+                if (cities != null) {
+                    List<String> filteredCities = new ArrayList<>(cities);
+                    Collections.sort(filteredCities);
+                    actvCity.setAdapter(getDarkTextAdapter(getContext(), filteredCities));
+                    actvCity.setText("", false);
+                }
+            }
+        });
+    }
+
+    private ArrayAdapter<String> getDarkTextAdapter(Context context, List<String> list) {
+        return new ArrayAdapter<String>(context, android.R.layout.simple_dropdown_item_1line, list) {
+            @NonNull
+            @Override
+            public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
+                View view = super.getView(position, convertView, parent);
+                ((TextView) view).setTextColor(Color.parseColor("#333333"));
+                return view;
+            }
+        };
+    }
+
+    private String translateLocationToGerman(String englishName) {
+        if (englishName == null || englishName.isEmpty()) return "";
+        switch (englishName) {
+            case "Germany": return "Deutschland";
+            case "Switzerland": return "Schweiz";
+            case "Austria": return "Österreich";
+            case "Italy": return "Italien";
+            case "Spain": return "Spanien";
+            case "France": return "Frankreich";
+            case "United States": return "USA";
+            case "United Kingdom": return "Großbritannien";
+            case "Netherlands": return "Niederlande";
+            case "Belgium": return "Belgien";
+            case "Poland": return "Polen";
+            case "Czechia":
+            case "Czech Republic": return "Tschechien";
+            case "Croatia": return "Kroatien";
+            case "Sweden": return "Schweden";
+            case "Norway": return "Norwegen";
+            case "Denmark": return "Dänemark";
+            case "Greece": return "Griechenland";
+            case "Bavaria": return "Bayern";
+            case "Hesse": return "Hessen";
+            case "Lower Saxony": return "Niedersachsen";
+            case "North Rhine-Westphalia": return "Nordrhein-Westfalen";
+            case "Rhineland-Palatinate": return "Rheinland-Pfalz";
+            case "Saxony": return "Sachsen";
+            case "Thuringia": return "Thüringen";
+            case "Cologne": return "Köln";
+            case "Munich": return "München";
+            case "Nuremberg": return "Nürnberg";
+            case "Vienna": return "Wien";
+            case "Rome": return "Rom";
+            case "Milan": return "Mailand";
+            case "Venice": return "Venedig";
+            case "Florence": return "Florenz";
+            case "Prague": return "Prag";
+            case "Warsaw": return "Warschau";
+            case "Geneva": return "Genf";
+            case "Zurich": return "Zürich";
+            case "Lucerne": return "Luzern";
+            default: return englishName;
+        }
     }
 
     private void applyCloudLocationFilter(String country, String state, String city) {
@@ -1911,7 +2241,7 @@ public class FotosFragment extends Fragment {
         currentFotosAdapter = new FotosAdapter(getContext(), relevanceItems, baseUrl, apiKey,
                 clickedAsset -> {
                     int index = rawListToProcess.indexOf(clickedAsset);
-                    openFullscreen(rawListToProcess, index);
+                    openFullscreen(rawListToProcess, index, false);
                 },
                 selectedCount -> {
                     if (getActivity() != null) {
@@ -1933,7 +2263,7 @@ public class FotosFragment extends Fragment {
             targetRecyclerView.getRecycledViewPool().clear();
             targetRecyclerView.setAdapter(currentFotosAdapter);
         } else {
-            targetRecyclerView.swapAdapter(currentFotosAdapter, true);
+            targetRecyclerView.setAdapter(currentFotosAdapter);
         }
 
         if (recyclerViewState != null) {
@@ -2201,18 +2531,15 @@ public class FotosFragment extends Fragment {
             PopupMenu popup = new PopupMenu(getContext(), v);
             popup.getMenu().add("Details einblenden");
 
-            // NEU: Wenn wir in einem Album sind, zeigen wir den Button zum Entfernen an!
             if (currentViewedAlbumId != null) {
                 popup.getMenu().add("Aus Album entfernen");
             }
 
             popup.setOnMenuItemClickListener(item -> {
                 String title = item.getTitle().toString();
-                // FIX: Wir prüfen auf den exakten, neuen Namen des Buttons
                 if (title.equals("Details einblenden") && bottomSheetBehavior != null) {
                     bottomSheetBehavior.setState(BottomSheetBehavior.STATE_EXPANDED);
                 }
-                // NEU: Klick auf "Aus Album entfernen"
                 else if (title.equals("Aus Album entfernen")) {
                     removeAssetFromAlbumServer(currentViewedAsset, currentViewedAlbumId);
                 }
@@ -2231,7 +2558,7 @@ public class FotosFragment extends Fragment {
             btnUploadLocal = new MaterialButton(getContext());
             btnUploadLocal.setText("☁️ Jetzt hochladen");
             btnUploadLocal.setTextColor(Color.WHITE);
-            btnUploadLocal.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#8CA8B3")));
+            btnUploadLocal.setBackgroundTintList(ColorStateList.valueOf(getPillHighlightColor()));
             btnUploadLocal.setCornerRadius(60);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             btnUploadLocal.setLayoutParams(params);
@@ -2264,7 +2591,6 @@ public class FotosFragment extends Fragment {
         });
     }
 
-    // --- NEU: Verbesserte Album-Entfernen Funktion mit 400-Fallback und Fehler-Ausleser ---
     private void removeAssetFromAlbumServer(ImmichAsset asset, String albumId) {
         if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
         Toast.makeText(getContext(), "Wird aus Album entfernt...", Toast.LENGTH_SHORT).show();
@@ -2275,7 +2601,6 @@ public class FotosFragment extends Fragment {
                 String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
                 URL url = new URL(cleanBaseUrl + "/api/albums/" + albumId + "/assets");
 
-                // Wir bereiten beide JSON-Varianten vor, die Immich erwarten könnte
                 String jsonAssetIds = "{\"assetIds\": [\"" + asset.id + "\"]}";
                 String jsonIds = "{\"ids\": [\"" + asset.id + "\"]}";
 
@@ -2285,12 +2610,10 @@ public class FotosFragment extends Fragment {
                 conn.setRequestProperty("Accept", "application/json");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setDoOutput(true);
-                // Versuch 1
                 conn.getOutputStream().write(jsonAssetIds.getBytes("UTF-8"));
 
                 int responseCode = conn.getResponseCode();
 
-                // Versuch 2: Falls der Server das Format 'assetIds' ablehnt (Fehler 400), probieren wir sofort 'ids'
                 if (responseCode == 400) {
                     url = new URL(cleanBaseUrl + "/api/albums/" + albumId + "/assets");
                     conn = (HttpURLConnection) url.openConnection();
@@ -2303,7 +2626,6 @@ public class FotosFragment extends Fragment {
                     responseCode = conn.getResponseCode();
                 }
 
-                // Versuch 3: Falls der API-Pfad der alten Immich-Version entspricht
                 if (responseCode == 404 || responseCode == 405) {
                     url = new URL(cleanBaseUrl + "/api/album/" + albumId + "/assets");
                     conn = (HttpURLConnection) url.openConnection();
@@ -2316,7 +2638,6 @@ public class FotosFragment extends Fragment {
                     responseCode = conn.getResponseCode();
                 }
 
-                // Wir fangen die detaillierte Fehlermeldung von Immich ab, falls es immer noch fehlschlägt
                 String errorResponse = "";
                 if (responseCode >= 400) {
                     try {
@@ -3000,8 +3321,29 @@ public class FotosFragment extends Fragment {
         }
     }
 
-    private void openFullscreen(List<ImmichAsset> contextList, int clickedPosition) {
+    // --- NEU: Auto-Play Methode für den Story-Modus ---
+    private void startStoryAutoPlay() {
+        if (storyAutoPlayRunnable != null) storyAutoPlayHandler.removeCallbacks(storyAutoPlayRunnable);
+        storyAutoPlayRunnable = () -> {
+            if (viewPagerFullscreen != null && viewPagerFullscreen.getAdapter() != null && fullscreenOverlay != null && fullscreenOverlay.getVisibility() == View.VISIBLE) {
+                int current = viewPagerFullscreen.getCurrentItem();
+                int total = viewPagerFullscreen.getAdapter().getItemCount();
+                if (current < total - 1) {
+                    viewPagerFullscreen.setCurrentItem(current + 1, true);
+                    storyAutoPlayHandler.postDelayed(storyAutoPlayRunnable, 3500); // Nächstes Bild nach 3,5s
+                } else {
+                    closeFullscreen(); // Beenden, wenn die Story durch ist
+                }
+            }
+        };
+        storyAutoPlayHandler.postDelayed(storyAutoPlayRunnable, 3500);
+    }
+
+    // --- ANGEPASST: openFullscreen nimmt nun ein Flag, ob es als Auto-Play Story geöffnet werden soll ---
+    private void openFullscreen(List<ImmichAsset> contextList, int clickedPosition, boolean isStoryMode) {
         if (contextList == null || getContext() == null || viewPagerFullscreen == null || fullscreenOverlay == null) return;
+
+        isStoryModeActive = isStoryMode;
 
         FullscreenPagerAdapter pagerAdapter = new FullscreenPagerAdapter(getContext(), contextList, currentApiUrl, currentApiKey, new FullscreenPagerAdapter.SwipeListener() {
             @Override
@@ -3030,6 +3372,12 @@ public class FotosFragment extends Fragment {
                 currentViewedAsset = contextList.get(position);
                 fillDetailsSheet(currentViewedAsset);
                 updateFullscreenUI();
+
+                // Wenn User wischt, Timer zurücksetzen, damit das Bild wieder 3.5s stehen bleibt
+                if (isStoryModeActive) {
+                    storyAutoPlayHandler.removeCallbacks(storyAutoPlayRunnable);
+                    storyAutoPlayHandler.postDelayed(storyAutoPlayRunnable, 3500);
+                }
             }
         };
         viewPagerFullscreen.registerOnPageChangeCallback(pageChangeCallback);
@@ -3039,7 +3387,12 @@ public class FotosFragment extends Fragment {
         if (bottomSheetBehavior != null) bottomSheetBehavior.setState(BottomSheetBehavior.STATE_HIDDEN);
         fullscreenOverlay.setAlpha(0f);
         fullscreenOverlay.setVisibility(View.VISIBLE);
-        fullscreenOverlay.animate().alpha(1f).setDuration(250).start();
+        fullscreenOverlay.animate().alpha(1f).setDuration(250).withEndAction(() -> {
+            // Nach dem Einblenden den Timer starten
+            if (isStoryModeActive) {
+                startStoryAutoPlay();
+            }
+        }).start();
     }
 
     private void fetchSingleAssetDetails(String assetId) {
@@ -3208,6 +3561,10 @@ public class FotosFragment extends Fragment {
     }
 
     private void closeFullscreen() {
+        // --- NEU: Timer stoppen, wenn Vollbild geschlossen wird ---
+        storyAutoPlayHandler.removeCallbacks(storyAutoPlayRunnable);
+        isStoryModeActive = false;
+
         if (bottomSheetBehavior != null) bottomSheetBehavior.setState(BottomSheetBehavior.STATE_HIDDEN);
         if (fullscreenOverlay != null) {
             fullscreenOverlay.animate().alpha(0f).setDuration(250).withEndAction(() -> {
@@ -3267,6 +3624,7 @@ public class FotosFragment extends Fragment {
 
                 loadLocalAssetsAsync();
 
+                fetchMemories();
                 fetchPhotosFromImmich(currentApiUrl, currentApiKey, currentPage);
                 syncFavoritesInBackground();
             } else if (recyclerViewFotos != null && "Fotos".equals(activeTab)) {
@@ -3279,6 +3637,114 @@ public class FotosFragment extends Fragment {
                 tvPlaceholder.setText("Bitte trage URL und API-Key in den Einstellungen ein.");
             }
         }
+    }
+
+    // --- NEU: Bulletproof JSON-Parser für Memories Titel ---
+    private void fetchMemories() {
+        if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
+
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
+
+                SimpleDateFormat iso = new SimpleDateFormat("yyyy-MM-dd'T'00:00:00.000'Z'", Locale.US);
+                iso.setTimeZone(TimeZone.getTimeZone("UTC"));
+                String today = iso.format(new Date());
+
+                URL url = new URL(cleanBaseUrl + "/api/memories?for=" + today);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty("x-api-key", currentApiKey);
+                conn.setRequestProperty("Accept", "application/json");
+
+                int responseCode = conn.getResponseCode();
+
+                if (responseCode == 404 || responseCode == 400 || responseCode == 405) {
+                    url = new URL(cleanBaseUrl + "/api/memories");
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setRequestProperty("x-api-key", currentApiKey);
+                    conn.setRequestProperty("Accept", "application/json");
+                    responseCode = conn.getResponseCode();
+                }
+
+                if (responseCode == 200 || responseCode == 201) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    StringBuilder response = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) response.append(line);
+                    reader.close();
+
+                    JsonElement element = JsonParser.parseString(response.toString());
+                    if (element.isJsonArray()) {
+                        JsonArray jsonArray = element.getAsJsonArray();
+                        List<ImmichMemory> memoriesList = new ArrayList<>();
+
+                        for (JsonElement item : jsonArray) {
+                            if (!item.isJsonObject()) continue;
+                            JsonObject obj = item.getAsJsonObject();
+                            ImmichMemory memory = new ImmichMemory();
+
+                            memory.id = obj.has("id") && !obj.get("id").isJsonNull() ? obj.get("id").getAsString() : "";
+
+                            // --- SAUBERER FIX: Prio 1 (title), Prio 2 (data.title), Prio 3 (name) ---
+                            String title = "";
+
+                            if (obj.has("title") && !obj.get("title").isJsonNull()) {
+                                title = obj.get("title").getAsString().trim();
+                            }
+
+                            if (title.isEmpty() && obj.has("data") && obj.get("data").isJsonObject()) {
+                                JsonObject dataObj = obj.getAsJsonObject("data");
+                                if (dataObj.has("title") && !dataObj.get("title").isJsonNull()) {
+                                    title = dataObj.get("title").getAsString().trim();
+                                }
+                            }
+
+                            if (title.isEmpty() && obj.has("name") && !obj.get("name").isJsonNull()) {
+                                title = obj.get("name").getAsString().trim();
+                            }
+
+                            // Nur wenn die API WIRKLICH nichts Brauchbares liefert, greift das Fallback
+                            if (title.isEmpty()) {
+                                title = "Erinnerung";
+                            }
+
+                            memory.title = title;
+
+                            // 3. Bilder auslesen
+                            if (obj.has("assets") && obj.get("assets").isJsonArray()) {
+                                memory.assets = new Gson().fromJson(obj.getAsJsonArray("assets"), new TypeToken<List<ImmichAsset>>(){}.getType());
+                            }
+
+                            if (memory.assets != null && !memory.assets.isEmpty()) {
+                                memoriesList.add(memory);
+                            }
+                        }
+
+                        if (getActivity() != null) {
+                            getActivity().runOnUiThread(() -> {
+                                if (!memoriesList.isEmpty() && recyclerViewMemories != null) {
+                                    recyclerViewMemories.setVisibility(View.VISIBLE);
+
+                                    MemoriesAdapter memAdapter = new MemoriesAdapter(getContext(), memoriesList, cleanBaseUrl, currentApiKey, memory -> {
+                                        // --- NEU: Story Flag (true) an openFullscreen senden ---
+                                        openFullscreen(memory.assets, 0, true);
+                                    });
+                                    recyclerViewMemories.setAdapter(memAdapter);
+                                } else if (recyclerViewMemories != null) {
+                                    recyclerViewMemories.setVisibility(View.GONE);
+                                }
+                            });
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                if (getActivity() != null && recyclerViewMemories != null) {
+                    getActivity().runOnUiThread(() -> recyclerViewMemories.setVisibility(View.GONE));
+                }
+            }
+        });
     }
 
     private void syncFavoritesInBackground() {
@@ -3519,7 +3985,8 @@ public class FotosFragment extends Fragment {
         currentFotosAdapter = new FotosAdapter(getContext(), groupedItems, baseUrl, apiKey,
                 clickedAsset -> {
                     int index = sortedAssets.indexOf(clickedAsset);
-                    openFullscreen(sortedAssets, index);
+                    // --- NORMALE BILDER: Kein Auto-Play (Story Mode = false) ---
+                    openFullscreen(sortedAssets, index, false);
                 },
                 selectedCount -> {
                     if (getActivity() != null) {
@@ -3541,7 +4008,7 @@ public class FotosFragment extends Fragment {
             targetRecyclerView.getRecycledViewPool().clear();
             targetRecyclerView.setAdapter(currentFotosAdapter);
         } else {
-            targetRecyclerView.swapAdapter(currentFotosAdapter, true);
+            targetRecyclerView.setAdapter(currentFotosAdapter);
         }
 
         if (recyclerViewState != null) {

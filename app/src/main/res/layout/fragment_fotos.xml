@@ -33,7 +33,6 @@
                 <TextView android:id="@+id/tab_bibliothek" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Bibliothek" android:textAlignment="center" android:paddingVertical="8dp" android:textColor="#555555" />
             </LinearLayout>
 
-            <!-- Obere Auswahl-Leiste (Nur noch Schließen & Anzahl) -->
             <LinearLayout
                 android:id="@+id/layout_selection_bar"
                 android:layout_width="match_parent"
@@ -71,23 +70,41 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent">
 
-            <!-- 1. FOTOS mit Pull-to-Refresh -->
-            <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-                android:id="@+id/swipe_refresh_layout"
+            <!-- 1. FOTOS Container (NEU: Beinhaltet nun Memories und das Grid) -->
+            <LinearLayout
+                android:id="@+id/layout_fotos_main"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent">
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:visibility="visible">
 
+                <!-- Die neue Google-Fotos mäßige Erinnerungsleiste -->
                 <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/recycler_view_fotos"
+                    android:id="@+id/recycler_view_memories"
                     android:layout_width="match_parent"
-                    android:layout_height="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="4dp"
                     android:clipToPadding="false"
-                    android:paddingBottom="100dp"
-                    android:visibility="visible"/>
+                    android:visibility="gone" />
 
-            </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+                <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+                    android:id="@+id/swipe_refresh_layout"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1">
 
-            <!-- 2. SUCHE (FIX: RAM-sicher, kein NestedScrollView für RecyclerView) -->
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/recycler_view_fotos"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:clipToPadding="false"
+                        android:paddingBottom="100dp"
+                        android:visibility="visible"/>
+                </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+            </LinearLayout>
+
+            <!-- 2. SUCHE (RAM-sicher, kein NestedScrollView für RecyclerView) -->
             <LinearLayout
                 android:id="@+id/layout_search"
                 android:layout_width="match_parent"
@@ -120,7 +137,6 @@
                     android:textColor="#888888"
                     android:visibility="gone" />
 
-                <!-- Der RecyclerView ist nun befreit und darf wieder Bilder recyceln! -->
                 <androidx.recyclerview.widget.RecyclerView
                     android:id="@+id/recycler_view_search"
                     android:layout_width="match_parent"
@@ -130,7 +146,6 @@
                     android:paddingBottom="100dp"
                     android:visibility="gone" />
 
-                <!-- Die Menü-Buttons packen wir in ein eigenes Scroll-Feld -->
                 <ScrollView
                     android:id="@+id/layout_search_scrollable_menus"
                     android:layout_width="match_parent"
@@ -143,7 +158,6 @@
                         android:orientation="vertical"
                         android:paddingBottom="100dp">
 
-                        <!-- Schnellauswahl Suche -->
                         <LinearLayout
                             android:id="@+id/layout_search_categories"
                             android:layout_width="match_parent"

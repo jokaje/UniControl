@@ -20,6 +20,7 @@ import android.widget.ImageView;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.ColorUtils;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -50,7 +51,7 @@ public class MainActivity extends AppCompatActivity {
 
     private ObjectAnimator uploadAnimator;
 
-    // NEU: Getrennte Status-Tracker für die Samsung-Optimierung
+    // Getrennte Status-Tracker für die Samsung-Optimierung
     private boolean isManualBackupRunning = false;
     private boolean isAutoBackupRunning = false;
 
@@ -73,19 +74,8 @@ public class MainActivity extends AppCompatActivity {
         bottomNav.setBackgroundColor(currentColor);
         bottomNav.setBackgroundTintList(null);
 
-        int darkColor = Color.parseColor("#333333");
-        ColorStateList iconColorStates = new ColorStateList(
-                new int[][]{
-                        new int[]{-android.R.attr.state_checked},
-                        new int[]{android.R.attr.state_checked}
-                },
-                new int[]{
-                        Color.argb(120, 51, 51, 51),
-                        darkColor
-                }
-        );
-        bottomNav.setItemIconTintList(iconColorStates);
-        bottomNav.setItemTextColor(iconColorStates);
+        // --- NEU: Initiale Farbe der Icons anhand der Hintergrundfarbe setzen ---
+        updateBottomNavColors(bottomNav, currentColor);
 
         if (savedInstanceState == null) {
             fm.beginTransaction().add(R.id.fragment_container, settingsFragment, "5").hide(settingsFragment).commit();
@@ -141,7 +131,7 @@ public class MainActivity extends AppCompatActivity {
             splashOverlay.setVisibility(View.GONE);
         }
 
-        // --- REPARIERT FÜR SAMSUNG: Getrennte, saubere Beobachter ---
+        // REPARIERT FÜR SAMSUNG: Getrennte, saubere Beobachter
         WorkManager.getInstance(this).getWorkInfosForUniqueWorkLiveData("ImmichManualBackup")
                 .observe(this, workInfos -> {
                     isManualBackupRunning = false;
@@ -166,6 +156,29 @@ public class MainActivity extends AppCompatActivity {
                     }
                     updateAnimationState();
                 });
+    }
+
+    // --- NEU: Funktion zur intelligenten Kontrast-Anpassung der Bottom-Bar-Icons ---
+    private void updateBottomNavColors(BottomNavigationView bottomNav, int bgColor) {
+        boolean isDark = ColorUtils.calculateLuminance(bgColor) < 0.5;
+
+        // Wenn Hintergrund dunkel ist -> Weiße Icons. Wenn hell -> Dunkelgraue Icons.
+        int checkedColor = isDark ? Color.WHITE : Color.parseColor("#333333");
+        // Unausgewählte Tabs machen wir leicht transparent, damit der ausgewählte Tab heraussticht
+        int uncheckedColor = isDark ? Color.argb(150, 255, 255, 255) : Color.argb(120, 51, 51, 51);
+
+        ColorStateList iconColorStates = new ColorStateList(
+                new int[][]{
+                        new int[]{-android.R.attr.state_checked},
+                        new int[]{android.R.attr.state_checked}
+                },
+                new int[]{
+                        uncheckedColor,
+                        checkedColor
+                }
+        );
+        bottomNav.setItemIconTintList(iconColorStates);
+        bottomNav.setItemTextColor(iconColorStates);
     }
 
     // Führt die Status beider Worker zusammen, ohne dass sie sich überschreiben
@@ -223,6 +236,12 @@ public class MainActivity extends AppCompatActivity {
     private int getDynamicColor(String key, String defaultHex) {
         SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, MODE_PRIVATE);
         String hex = prefs.getString(key, defaultHex);
+
+        // --- NEU: Crash-Schutz, falls der User eine Farbe ohne '#' eingibt ---
+        if (hex != null && !hex.startsWith("#")) {
+            hex = "#" + hex;
+        }
+
         try {
             return Color.parseColor(hex);
         } catch (Exception e) {
@@ -239,9 +258,13 @@ public class MainActivity extends AppCompatActivity {
     private void animateMenuColor(BottomNavigationView bottomNav, int startColor, int endColor) {
         ValueAnimator colorAnimation = ValueAnimator.ofObject(new ArgbEvaluator(), startColor, endColor);
         colorAnimation.setDuration(300);
-        colorAnimation.addUpdateListener(animator ->
-                bottomNav.setBackgroundColor((int) animator.getAnimatedValue())
-        );
+        colorAnimation.addUpdateListener(animator -> {
+            int animatedColor = (int) animator.getAnimatedValue();
+            // Ändert den Hintergrund der Bar...
+            bottomNav.setBackgroundColor(animatedColor);
+            // ...und passt die Farbe der Icons fließend WÄHREND der Animation an!
+            updateBottomNavColors(bottomNav, animatedColor);
+        });
         colorAnimation.start();
     }
 }

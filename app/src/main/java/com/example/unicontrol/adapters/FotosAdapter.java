@@ -1,6 +1,7 @@
 package com.example.unicontrol.adapters;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.view.LayoutInflater;
@@ -10,12 +11,14 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.load.model.GlideUrl;
 import com.bumptech.glide.load.model.LazyHeaders;
 import com.example.unicontrol.R;
+import com.example.unicontrol.fragments.SettingsFragment;
 import com.example.unicontrol.models.GalleryItem;
 import com.example.unicontrol.models.ImmichAsset;
 
@@ -109,26 +112,53 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
         GalleryItem item = items.get(position);
 
+        // --- NEU: Intelligente Farbermittlung (Luminanz) für die Datums-Header ---
+        SharedPreferences prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+        String colorStr = prefs.getString(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2");
+        int themeColor = Color.parseColor("#F49AC2");
+        try {
+            themeColor = Color.parseColor(colorStr);
+        } catch (Exception e) {}
+
+        boolean isDarkTheme = ColorUtils.calculateLuminance(themeColor) < 0.5;
+        // Haupt-Monats-Header: Knackiges Weiß oder starkes Grau
+        int monthColor = isDarkTheme ? Color.WHITE : Color.parseColor("#333333");
+        // Sub-Tages-Header: Etwas weicher, damit der Monat optisch heraussticht
+        int dayColor = isDarkTheme ? Color.parseColor("#DADADA") : Color.parseColor("#555555");
+
+
         if (holder instanceof MonthHeaderViewHolder) {
-            ((MonthHeaderViewHolder) holder).tvMonth.setText(item.title);
+            MonthHeaderViewHolder monthHolder = (MonthHeaderViewHolder) holder;
+            monthHolder.tvMonth.setText(item.title);
+            monthHolder.tvMonth.setTextColor(monthColor);
+
+            // WICHTIG: Klicks hart deaktivieren, um Blocking zu verhindern
+            monthHolder.itemView.setOnClickListener(null);
+            monthHolder.itemView.setOnLongClickListener(null);
+            monthHolder.itemView.setClickable(false);
+
         } else if (holder instanceof DayHeaderViewHolder) {
-            ((DayHeaderViewHolder) holder).tvDay.setText(item.title);
+            DayHeaderViewHolder dayHolder = (DayHeaderViewHolder) holder;
+            dayHolder.tvDay.setText(item.title);
+            dayHolder.tvDay.setTextColor(dayColor);
+
+            // WICHTIG: Klicks hart deaktivieren, um Blocking zu verhindern
+            dayHolder.itemView.setOnClickListener(null);
+            dayHolder.itemView.setOnLongClickListener(null);
+            dayHolder.itemView.setClickable(false);
+
         } else if (holder instanceof FotoViewHolder) {
             ImmichAsset asset = item.asset;
             FotoViewHolder fotoHolder = (FotoViewHolder) holder;
 
-            // --- NEU: Fallunterscheidung Lokal vs. Cloud ---
+            // Bild laden lokal vs Cloud
             if (asset.isLocalOnly && asset.localUri != null) {
-                // Bild direkt vom Handy laden
                 Glide.with(context)
                         .load(Uri.parse(asset.localUri))
                         .centerCrop()
                         .into(fotoHolder.imageView);
-
-                // Wölkchen-Icon für ausstehenden Upload einblenden
                 fotoHolder.iconPending.setVisibility(View.VISIBLE);
             } else {
-                // Bild regulär über die API aus der Cloud laden
                 String thumbnailUrl = baseUrl + "/api/assets/" + asset.id + "/thumbnail";
                 GlideUrl glideUrl = new GlideUrl(thumbnailUrl, new LazyHeaders.Builder()
                         .addHeader("x-api-key", apiKey)
@@ -139,8 +169,6 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
                         .load(glideUrl)
                         .centerCrop()
                         .into(fotoHolder.imageView);
-
-                // Wölkchen ausblenden (Bild ist ja schon online)
                 fotoHolder.iconPending.setVisibility(View.GONE);
             }
 
@@ -151,7 +179,6 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
             }
 
             boolean isSelected = selectedAssets.contains(asset);
-
             if (isSelected) {
                 fotoHolder.imageView.setScaleX(0.85f);
                 fotoHolder.imageView.setScaleY(0.85f);
@@ -165,6 +192,10 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
 
                 if (fotoHolder.iconSelected != null) fotoHolder.iconSelected.setVisibility(View.GONE);
             }
+
+            // --- WICHTIG: Klicks explizit erlauben und Listener sauber zuweisen ---
+            fotoHolder.itemView.setClickable(true);
+            fotoHolder.itemView.setFocusable(true);
 
             fotoHolder.itemView.setOnClickListener(v -> {
                 if (isSelectionMode) {
@@ -212,7 +243,7 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
         ImageView imageView;
         ImageView iconPlay;
         TextView iconSelected;
-        ImageView iconPending; // NEU
+        ImageView iconPending;
 
         public FotoViewHolder(@NonNull View itemView) {
             super(itemView);
