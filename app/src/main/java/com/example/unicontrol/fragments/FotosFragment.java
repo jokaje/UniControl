@@ -146,6 +146,12 @@ public class FotosFragment extends Fragment {
 
     private ImageView btnShareFullscreen, btnEditFullscreen, btnAddToFullscreen, btnDeleteFullscreen;
     private MaterialButton btnUploadLocal;
+    private MaterialButton btnSelectionUploadLocal;
+
+    // Globale UI Elemente für den Vollbildmodus
+    private View btnMoreOptions;
+    private View bottomMenuFullscreen;
+    private boolean isFullscreenUiVisible = false;
 
     private FotosAdapter currentFotosAdapter;
 
@@ -172,10 +178,13 @@ public class FotosFragment extends Fragment {
     private boolean isUpdatingDescriptionUI = false;
     private ViewPager2.OnPageChangeCallback pageChangeCallback;
 
-    // --- NEU: Timer & Handler für die Auto-Play Story Funktion ---
     private Handler storyAutoPlayHandler = new Handler(Looper.getMainLooper());
-    private Runnable storyAutoPlayRunnable;
     private boolean isStoryModeActive = false;
+    private boolean isStoryPaused = false;
+    private long lastTapTime = 0;
+
+    private android.animation.ValueAnimator storyAnimator;
+    private LinearLayout storyProgressContainer;
 
     private int currentPage = 1;
     private boolean isLoading = false;
@@ -288,6 +297,23 @@ public class FotosFragment extends Fragment {
         btnSelectionAddTo = view.findViewById(R.id.btn_selection_add_to);
         btnSelectionDelete = view.findViewById(R.id.btn_selection_delete);
 
+        if (layoutSelectionBottomBar instanceof LinearLayout) {
+            btnSelectionUploadLocal = new MaterialButton(getContext());
+            btnSelectionUploadLocal.setText("☁️ Jetzt hochladen");
+            btnSelectionUploadLocal.setTextColor(Color.WHITE);
+            btnSelectionUploadLocal.setCornerRadius(60);
+
+            LinearLayout.LayoutParams paramsUpload = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+            paramsUpload.setMargins(64, 0, 64, 0);
+            btnSelectionUploadLocal.setLayoutParams(paramsUpload);
+            btnSelectionUploadLocal.setVisibility(View.GONE);
+            btnSelectionUploadLocal.setOnClickListener(v -> {
+                if (currentFotosAdapter != null) uploadMultipleAssets(currentFotosAdapter.getSelectedAssets());
+            });
+            ((LinearLayout) layoutSelectionBottomBar).addView(btnSelectionUploadLocal);
+        }
+
         if (btnCloseSelection != null) btnCloseSelection.setOnClickListener(v -> {
             if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
         });
@@ -371,6 +397,15 @@ public class FotosFragment extends Fragment {
 
         selectTab(tabFotos, "Fotos");
         loadAppropriateUrlAndKey();
+    }
+
+    private void toggleFullscreenUI() {
+        isFullscreenUiVisible = !isFullscreenUiVisible;
+        int visibility = isFullscreenUiVisible ? View.VISIBLE : View.GONE;
+        if (btnCloseFullscreen != null) btnCloseFullscreen.setVisibility(visibility);
+        if (btnFavorite != null) btnFavorite.setVisibility(visibility);
+        if (btnMoreOptions != null) btnMoreOptions.setVisibility(visibility);
+        if (bottomMenuFullscreen != null) bottomMenuFullscreen.setVisibility(visibility);
     }
 
     private List<ImmichAsset> filterLocalAssetsWithServer(List<ImmichAsset> localAssets) {
@@ -2250,6 +2285,7 @@ public class FotosFragment extends Fragment {
                                 if (layoutSelectionBar != null) layoutSelectionBar.setVisibility(View.VISIBLE);
                                 if (layoutSelectionBottomBar != null) layoutSelectionBottomBar.setVisibility(View.VISIBLE);
                                 if (tvSelectionCount != null) tvSelectionCount.setText(selectedCount + (selectedCount == 1 ? " ausgewählt" : " ausgewählt"));
+                                updateSelectionBottomBarUI();
                             } else {
                                 if (layoutSelectionBar != null) layoutSelectionBar.setVisibility(View.GONE);
                                 if (layoutSelectionBottomBar != null) layoutSelectionBottomBar.setVisibility(View.GONE);
@@ -2525,8 +2561,8 @@ public class FotosFragment extends Fragment {
     private void setupActionButtons(View view) {
         if (btnFavorite != null) btnFavorite.setOnClickListener(v -> toggleFavoriteStatus());
 
-        View moreOptions = view.findViewById(R.id.btn_more_options);
-        if (moreOptions != null) moreOptions.setOnClickListener(v -> {
+        btnMoreOptions = view.findViewById(R.id.btn_more_options);
+        if (btnMoreOptions != null) btnMoreOptions.setOnClickListener(v -> {
             if (getContext() == null || currentViewedAsset == null) return;
             PopupMenu popup = new PopupMenu(getContext(), v);
             popup.getMenu().add("Details einblenden");
@@ -2554,13 +2590,18 @@ public class FotosFragment extends Fragment {
         btnDeleteFullscreen = view.findViewById(R.id.btn_delete);
 
         if (btnShareFullscreen != null) {
+            bottomMenuFullscreen = (View) btnShareFullscreen.getParent();
+
             LinearLayout bottomMenu = (LinearLayout) btnShareFullscreen.getParent();
             btnUploadLocal = new MaterialButton(getContext());
             btnUploadLocal.setText("☁️ Jetzt hochladen");
             btnUploadLocal.setTextColor(Color.WHITE);
             btnUploadLocal.setBackgroundTintList(ColorStateList.valueOf(getPillHighlightColor()));
             btnUploadLocal.setCornerRadius(60);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+            params.setMargins(64, 0, 64, 0);
             btnUploadLocal.setLayoutParams(params);
             btnUploadLocal.setVisibility(View.GONE);
             btnUploadLocal.setOnClickListener(v -> uploadSingleAsset(currentViewedAsset));
@@ -3127,13 +3168,49 @@ public class FotosFragment extends Fragment {
             if (btnEditFullscreen != null) btnEditFullscreen.setVisibility(View.GONE);
             if (btnAddToFullscreen != null) btnAddToFullscreen.setVisibility(View.GONE);
             if (btnDeleteFullscreen != null) btnDeleteFullscreen.setVisibility(View.GONE);
-            if (btnUploadLocal != null) btnUploadLocal.setVisibility(View.VISIBLE);
+            if (btnUploadLocal != null) {
+                btnUploadLocal.setVisibility(View.VISIBLE);
+                if (btnUploadLocal.getParent() instanceof View) {
+                    ((View) btnUploadLocal.getParent()).requestLayout();
+                }
+            }
         } else {
             if (btnShareFullscreen != null) btnShareFullscreen.setVisibility(View.VISIBLE);
             if (btnEditFullscreen != null) btnEditFullscreen.setVisibility(View.VISIBLE);
             if (btnAddToFullscreen != null) btnAddToFullscreen.setVisibility(View.VISIBLE);
             if (btnDeleteFullscreen != null) btnDeleteFullscreen.setVisibility(View.VISIBLE);
             if (btnUploadLocal != null) btnUploadLocal.setVisibility(View.GONE);
+        }
+    }
+
+    private void updateSelectionBottomBarUI() {
+        if (currentFotosAdapter == null || layoutSelectionBottomBar == null) return;
+        List<ImmichAsset> selected = currentFotosAdapter.getSelectedAssets();
+        boolean hasLocal = false;
+        boolean hasCloud = false;
+        for (ImmichAsset a : selected) {
+            if (a.isLocalOnly) hasLocal = true;
+            else hasCloud = true;
+        }
+
+        if (hasLocal && !hasCloud) {
+            if (btnSelectionShare != null) btnSelectionShare.setVisibility(View.GONE);
+            if (btnSelectionAddTo != null) btnSelectionAddTo.setVisibility(View.GONE);
+            if (btnSelectionDelete != null) btnSelectionDelete.setVisibility(View.GONE);
+
+            if (btnSelectionUploadLocal != null) {
+                btnSelectionUploadLocal.setVisibility(View.VISIBLE);
+                btnSelectionUploadLocal.setBackgroundTintList(ColorStateList.valueOf(getPillHighlightColor()));
+                if (btnSelectionUploadLocal.getParent() instanceof View) {
+                    ((View) btnSelectionUploadLocal.getParent()).requestLayout();
+                }
+            }
+        } else {
+            if (btnSelectionShare != null) btnSelectionShare.setVisibility(View.VISIBLE);
+            if (btnSelectionAddTo != null) btnSelectionAddTo.setVisibility(View.VISIBLE);
+            if (btnSelectionDelete != null) btnSelectionDelete.setVisibility(View.VISIBLE);
+
+            if (btnSelectionUploadLocal != null) btnSelectionUploadLocal.setVisibility(View.GONE);
         }
     }
 
@@ -3144,115 +3221,173 @@ public class FotosFragment extends Fragment {
         Toast.makeText(getContext(), "Upload startet...", Toast.LENGTH_SHORT).show();
 
         Executors.newSingleThreadExecutor().execute(() -> {
-            HttpURLConnection conn = null;
-            try {
-                String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
-                URL url = new URL(cleanBaseUrl + "/api/assets");
-                SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-                String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, "android-app");
+            String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
+            SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+            String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, "android-app");
 
-                String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
-                conn = (HttpURLConnection) url.openConnection();
-                conn.setUseCaches(false);
-                conn.setDoOutput(true);
-                conn.setRequestMethod("POST");
-                conn.setRequestProperty("x-api-key", currentApiKey);
-                conn.setRequestProperty("Accept", "application/json");
-                conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            boolean success = performSingleSyncUpload(asset, cleanBaseUrl, currentApiKey, deviceId);
 
-                OutputStream outputStream = conn.getOutputStream();
-                java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.OutputStreamWriter(outputStream, "UTF-8"), true);
-
-                writer.append("--").append(boundary).append("\r\n");
-                writer.append("Content-Disposition: form-data; name=\"deviceAssetId\"\r\n\r\n");
-                writer.append(asset.deviceAssetId).append("\r\n");
-
-                writer.append("--").append(boundary).append("\r\n");
-                writer.append("Content-Disposition: form-data; name=\"deviceId\"\r\n\r\n");
-                writer.append(deviceId).append("\r\n");
-
-                writer.append("--").append(boundary).append("\r\n");
-                writer.append("Content-Disposition: form-data; name=\"fileCreatedAt\"\r\n\r\n");
-                writer.append(asset.fileCreatedAt).append("\r\n");
-
-                writer.append("--").append(boundary).append("\r\n");
-                writer.append("Content-Disposition: form-data; name=\"fileModifiedAt\"\r\n\r\n");
-                writer.append(asset.fileCreatedAt).append("\r\n");
-
-                writer.append("--").append(boundary).append("\r\n");
-                writer.append("Content-Disposition: form-data; name=\"isFavorite\"\r\n\r\n");
-                writer.append("false").append("\r\n");
-
-                String fileName = asset.originalFileName;
-                if (fileName == null || fileName.isEmpty()) fileName = "upload.jpg";
-                String mimeType = asset.type.equals("VIDEO") ? "video/mp4" : "image/jpeg";
-
-                writer.append("--").append(boundary).append("\r\n");
-                writer.append("Content-Disposition: form-data; name=\"assetData\"; filename=\"").append(fileName).append("\"\r\n");
-                writer.append("Content-Type: ").append(mimeType).append("\r\n\r\n");
-                writer.flush();
-
-                Uri uri = Uri.parse(asset.localUri);
-                InputStream is = getContext().getContentResolver().openInputStream(uri);
-                if (is != null) {
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    while ((bytesRead = is.read(buffer)) != -1) {
-                        outputStream.write(buffer, 0, bytesRead);
+            if (getActivity() != null) {
+                getActivity().runOnUiThread(() -> {
+                    if (success) {
+                        asset.isLocalOnly = false;
+                        localMediaCache.remove(asset);
+                        globalAssetList.add(asset);
+                        updateFullscreenUI();
+                        refreshVisibleGrids();
+                        Toast.makeText(getContext(), "Upload erfolgreich! ☁️➡️✅", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(getContext(), "Fehler beim Upload.", Toast.LENGTH_SHORT).show();
                     }
-                    outputStream.flush();
-                    is.close();
+                });
+            }
+        });
+    }
+
+    private void uploadMultipleAssets(List<ImmichAsset> assetsToUpload) {
+        if (assetsToUpload == null || assetsToUpload.isEmpty() || currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
+
+        List<ImmichAsset> locals = new ArrayList<>();
+        for (ImmichAsset a : assetsToUpload) {
+            if (a.isLocalOnly && a.localUri != null) locals.add(a);
+        }
+
+        if (locals.isEmpty()) return;
+
+        Toast.makeText(getContext(), locals.size() + " Bilder werden hochgeladen...", Toast.LENGTH_LONG).show();
+
+        Executors.newSingleThreadExecutor().execute(() -> {
+            String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
+            SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+            String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, "android-app");
+
+            int successCount = 0;
+            int failCount = 0;
+
+            for (int i = 0; i < locals.size(); i++) {
+                ImmichAsset asset = locals.get(i);
+                final int progress = i + 1;
+                if (getActivity() != null && locals.size() > 3 && progress % 3 == 0) {
+                    getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Upload " + progress + " von " + locals.size() + "...", Toast.LENGTH_SHORT).show());
                 }
 
-                writer.append("\r\n");
-                writer.append("--").append(boundary).append("--\r\n");
-                writer.close();
-
-                int responseCode = conn.getResponseCode();
-                if (responseCode == 200 || responseCode == 201) {
-                    BufferedReader reader = new BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
-                    StringBuilder response = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) response.append(line);
-                    reader.close();
-
-                    JsonObject responseObj = JsonParser.parseString(response.toString()).getAsJsonObject();
-                    if (responseObj.has("id")) {
-                        asset.id = responseObj.get("id").getAsString();
-                    }
-
+                boolean success = performSingleSyncUpload(asset, cleanBaseUrl, currentApiKey, deviceId);
+                if (success) {
+                    successCount++;
                     if (getActivity() != null) {
                         getActivity().runOnUiThread(() -> {
                             asset.isLocalOnly = false;
                             localMediaCache.remove(asset);
-                            globalAssetList.add(asset);
-                            updateFullscreenUI();
-                            refreshVisibleGrids();
-                            Toast.makeText(getContext(), "Upload erfolgreich! ☁️➡️✅", Toast.LENGTH_SHORT).show();
-                        });
-                    }
-                } else if (responseCode == 409) {
-                    if (getActivity() != null) {
-                        getActivity().runOnUiThread(() -> {
-                            asset.isLocalOnly = false;
-                            localMediaCache.remove(asset);
-                            updateFullscreenUI();
-                            refreshVisibleGrids();
-                            Toast.makeText(getContext(), "Bild war bereits in der Cloud!", Toast.LENGTH_SHORT).show();
+                            if (!globalAssetList.contains(asset)) {
+                                globalAssetList.add(asset);
+                            }
                         });
                     }
                 } else {
-                    if (getActivity() != null) {
-                        int finalResponseCode = responseCode;
-                        getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Fehler beim Upload: " + finalResponseCode, Toast.LENGTH_LONG).show());
-                    }
+                    failCount++;
                 }
-            } catch (Exception e) {
-                if (getActivity() != null) getActivity().runOnUiThread(() -> Toast.makeText(getContext(), "Netzwerkfehler beim Upload.", Toast.LENGTH_SHORT).show());
-            } finally {
-                if (conn != null) conn.disconnect();
+            }
+
+            final int finalSuccess = successCount;
+            final int finalFail = failCount;
+
+            if (getActivity() != null) {
+                getActivity().runOnUiThread(() -> {
+                    if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
+                    refreshVisibleGrids();
+                    if (finalFail == 0) {
+                        Toast.makeText(getContext(), "Alle " + finalSuccess + " Uploads erfolgreich! ☁️➡️✅", Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(getContext(), finalSuccess + " erfolgreich, " + finalFail + " fehlgeschlagen.", Toast.LENGTH_LONG).show();
+                    }
+                });
             }
         });
+    }
+
+    private boolean performSingleSyncUpload(ImmichAsset asset, String cleanBaseUrl, String apiKey, String deviceId) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(cleanBaseUrl + "/api/assets");
+            String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setUseCaches(false);
+            conn.setDoOutput(true);
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("x-api-key", apiKey);
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+
+            OutputStream outputStream = conn.getOutputStream();
+            java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.OutputStreamWriter(outputStream, "UTF-8"), true);
+
+            writer.append("--").append(boundary).append("\r\n");
+            writer.append("Content-Disposition: form-data; name=\"deviceAssetId\"\r\n\r\n");
+            writer.append(asset.deviceAssetId).append("\r\n");
+
+            writer.append("--").append(boundary).append("\r\n");
+            writer.append("Content-Disposition: form-data; name=\"deviceId\"\r\n\r\n");
+            writer.append(deviceId).append("\r\n");
+
+            writer.append("--").append(boundary).append("\r\n");
+            writer.append("Content-Disposition: form-data; name=\"fileCreatedAt\"\r\n\r\n");
+            writer.append(asset.fileCreatedAt).append("\r\n");
+
+            writer.append("--").append(boundary).append("\r\n");
+            writer.append("Content-Disposition: form-data; name=\"fileModifiedAt\"\r\n\r\n");
+            writer.append(asset.fileCreatedAt).append("\r\n");
+
+            writer.append("--").append(boundary).append("\r\n");
+            writer.append("Content-Disposition: form-data; name=\"isFavorite\"\r\n\r\n");
+            writer.append("false").append("\r\n");
+
+            String fileName = asset.originalFileName;
+            if (fileName == null || fileName.isEmpty()) fileName = "upload.jpg";
+            String mimeType = asset.type.equals("VIDEO") ? "video/mp4" : "image/jpeg";
+
+            writer.append("--").append(boundary).append("\r\n");
+            writer.append("Content-Disposition: form-data; name=\"assetData\"; filename=\"").append(fileName).append("\"\r\n");
+            writer.append("Content-Type: ").append(mimeType).append("\r\n\r\n");
+            writer.flush();
+
+            Uri uri = Uri.parse(asset.localUri);
+            InputStream is = getContext().getContentResolver().openInputStream(uri);
+            if (is != null) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = is.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+                outputStream.flush();
+                is.close();
+            }
+
+            writer.append("\r\n");
+            writer.append("--").append(boundary).append("--\r\n");
+            writer.close();
+
+            int responseCode = conn.getResponseCode();
+            if (responseCode == 200 || responseCode == 201) {
+                BufferedReader reader = new BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                StringBuilder response = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) response.append(line);
+                reader.close();
+
+                JsonObject responseObj = JsonParser.parseString(response.toString()).getAsJsonObject();
+                if (responseObj.has("id")) {
+                    asset.id = responseObj.get("id").getAsString();
+                }
+                return true;
+            } else if (responseCode == 409) {
+                return true;
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
     }
 
     private void setupDescriptionSaver() {
@@ -3321,29 +3456,105 @@ public class FotosFragment extends Fragment {
         }
     }
 
-    // --- NEU: Auto-Play Methode für den Story-Modus ---
-    private void startStoryAutoPlay() {
-        if (storyAutoPlayRunnable != null) storyAutoPlayHandler.removeCallbacks(storyAutoPlayRunnable);
-        storyAutoPlayRunnable = () -> {
-            if (viewPagerFullscreen != null && viewPagerFullscreen.getAdapter() != null && fullscreenOverlay != null && fullscreenOverlay.getVisibility() == View.VISIBLE) {
-                int current = viewPagerFullscreen.getCurrentItem();
-                int total = viewPagerFullscreen.getAdapter().getItemCount();
-                if (current < total - 1) {
-                    viewPagerFullscreen.setCurrentItem(current + 1, true);
-                    storyAutoPlayHandler.postDelayed(storyAutoPlayRunnable, 3500); // Nächstes Bild nach 3,5s
-                } else {
-                    closeFullscreen(); // Beenden, wenn die Story durch ist
+    private void startStoryAutoPlay(int position, int total) {
+        if (storyAnimator != null) {
+            storyAnimator.cancel();
+        }
+
+        storyAnimator = android.animation.ValueAnimator.ofInt(0, 10000);
+        storyAnimator.setDuration(3500);
+        storyAnimator.setInterpolator(new android.view.animation.LinearInterpolator());
+
+        storyAnimator.addUpdateListener(animation -> {
+            if (storyProgressContainer != null && position < storyProgressContainer.getChildCount()) {
+                android.widget.ProgressBar pb = (android.widget.ProgressBar) storyProgressContainer.getChildAt(position);
+                if (pb != null) {
+                    pb.setProgress((int) animation.getAnimatedValue());
                 }
             }
-        };
-        storyAutoPlayHandler.postDelayed(storyAutoPlayRunnable, 3500);
+        });
+
+        storyAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                if (isStoryModeActive && viewPagerFullscreen != null && viewPagerFullscreen.getCurrentItem() == position && !isStoryPaused) {
+                    if (position < total - 1) {
+                        viewPagerFullscreen.setCurrentItem(position + 1, true);
+                    } else {
+                        closeFullscreen();
+                    }
+                }
+            }
+        });
+
+        if (!isStoryPaused) {
+            storyAnimator.start();
+        }
     }
 
-    // --- ANGEPASST: openFullscreen nimmt nun ein Flag, ob es als Auto-Play Story geöffnet werden soll ---
     private void openFullscreen(List<ImmichAsset> contextList, int clickedPosition, boolean isStoryMode) {
         if (contextList == null || getContext() == null || viewPagerFullscreen == null || fullscreenOverlay == null) return;
 
         isStoryModeActive = isStoryMode;
+        isStoryPaused = false;
+
+        // UI initial verbergen für reines Vollbild
+        isFullscreenUiVisible = false;
+        if (btnCloseFullscreen != null) btnCloseFullscreen.setVisibility(View.GONE);
+        if (btnFavorite != null) btnFavorite.setVisibility(View.GONE);
+        if (btnMoreOptions != null) btnMoreOptions.setVisibility(View.GONE);
+        if (bottomMenuFullscreen != null) bottomMenuFullscreen.setVisibility(View.GONE);
+
+        if (isStoryModeActive) {
+            if (storyProgressContainer == null) {
+                storyProgressContainer = new LinearLayout(getContext());
+                storyProgressContainer.setOrientation(LinearLayout.HORIZONTAL);
+                CoordinatorLayout.LayoutParams lp = new CoordinatorLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        (int)(4 * getResources().getDisplayMetrics().density));
+                lp.setMargins(32, 64, 32, 0);
+                lp.gravity = android.view.Gravity.TOP;
+                storyProgressContainer.setLayoutParams(lp);
+                fullscreenOverlay.addView(storyProgressContainer);
+            }
+            storyProgressContainer.removeAllViews();
+            storyProgressContainer.setWeightSum(contextList.size());
+
+            for (int i = 0; i < contextList.size(); i++) {
+                android.widget.ProgressBar pb = new android.widget.ProgressBar(getContext(), null, android.R.attr.progressBarStyleHorizontal);
+                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+                p.setMargins(8, 0, 8, 0);
+                pb.setLayoutParams(p);
+                pb.setMax(10000);
+                pb.setProgress(0);
+
+                android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+                bg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+                bg.setCornerRadius(20f);
+                bg.setColor(Color.parseColor("#44FFFFFF"));
+
+                android.graphics.drawable.GradientDrawable progress = new android.graphics.drawable.GradientDrawable();
+                progress.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+                progress.setCornerRadius(20f);
+                progress.setColor(Color.WHITE);
+
+                android.graphics.drawable.ClipDrawable clipProgress = new android.graphics.drawable.ClipDrawable(
+                        progress, android.view.Gravity.LEFT, android.graphics.drawable.ClipDrawable.HORIZONTAL);
+
+                android.graphics.drawable.LayerDrawable layerDrawable = new android.graphics.drawable.LayerDrawable(new Drawable[]{bg, clipProgress});
+                layerDrawable.setId(0, android.R.id.background);
+                layerDrawable.setId(1, android.R.id.progress);
+
+                pb.setProgressDrawable(layerDrawable);
+
+                storyProgressContainer.addView(pb);
+            }
+            storyProgressContainer.setVisibility(View.VISIBLE);
+        } else {
+            if (storyProgressContainer != null) {
+                storyProgressContainer.setVisibility(View.GONE);
+            }
+        }
 
         FullscreenPagerAdapter pagerAdapter = new FullscreenPagerAdapter(getContext(), contextList, currentApiUrl, currentApiKey, new FullscreenPagerAdapter.SwipeListener() {
             @Override
@@ -3359,13 +3570,51 @@ public class FotosFragment extends Fragment {
                     closeFullscreen();
                 }
             }
-        });
+            @Override
+            public void onSingleTap(float x, float width) {
+                long now = System.currentTimeMillis();
+                if (now - lastTapTime < 300) return; // Verhindert Bug mit zwei übersprungenen Bildern
+                lastTapTime = now;
 
-        viewPagerFullscreen.setAdapter(pagerAdapter);
+                if (isStoryModeActive) {
+                    int current = viewPagerFullscreen.getCurrentItem();
+                    if (x < width * 0.3f) {
+                        if (current > 0) viewPagerFullscreen.setCurrentItem(current - 1, true);
+                        else if (storyAnimator != null) {
+                            storyAnimator.cancel();
+                            storyAnimator.start();
+                        }
+                    } else if (x > width * 0.7f) {
+                        int total = viewPagerFullscreen.getAdapter().getItemCount();
+                        if (current < total - 1) viewPagerFullscreen.setCurrentItem(current + 1, true);
+                        else closeFullscreen();
+                    } else {
+                        toggleFullscreenUI();
+                    }
+                } else {
+                    toggleFullscreenUI();
+                }
+            }
+            @Override
+            public void onLongPress() {
+                if (isStoryModeActive && storyAnimator != null) {
+                    if (isStoryPaused) {
+                        isStoryPaused = false;
+                        storyAnimator.resume();
+                        Toast.makeText(getContext(), "▶️ Fortgesetzt", Toast.LENGTH_SHORT).show();
+                    } else {
+                        isStoryPaused = true;
+                        storyAnimator.pause();
+                        Toast.makeText(getContext(), "⏸️ Angehalten", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+        });
 
         if (pageChangeCallback != null) {
             viewPagerFullscreen.unregisterOnPageChangeCallback(pageChangeCallback);
         }
+
         pageChangeCallback = new ViewPager2.OnPageChangeCallback() {
             @Override
             public void onPageSelected(int position) {
@@ -3373,26 +3622,29 @@ public class FotosFragment extends Fragment {
                 fillDetailsSheet(currentViewedAsset);
                 updateFullscreenUI();
 
-                // Wenn User wischt, Timer zurücksetzen, damit das Bild wieder 3.5s stehen bleibt
+                isStoryPaused = false; // Beim Bildwechsel automatisch Pausenstatus zurücksetzen
+
                 if (isStoryModeActive) {
-                    storyAutoPlayHandler.removeCallbacks(storyAutoPlayRunnable);
-                    storyAutoPlayHandler.postDelayed(storyAutoPlayRunnable, 3500);
+                    if (storyProgressContainer != null) {
+                        for (int i = 0; i < storyProgressContainer.getChildCount(); i++) {
+                            android.widget.ProgressBar pb = (android.widget.ProgressBar) storyProgressContainer.getChildAt(i);
+                            if (i < position) pb.setProgress(10000);
+                            else if (i > position) pb.setProgress(0);
+                        }
+                    }
+                    startStoryAutoPlay(position, contextList.size());
                 }
             }
         };
-        viewPagerFullscreen.registerOnPageChangeCallback(pageChangeCallback);
 
+        viewPagerFullscreen.registerOnPageChangeCallback(pageChangeCallback);
+        viewPagerFullscreen.setAdapter(pagerAdapter);
         viewPagerFullscreen.setCurrentItem(clickedPosition, false);
 
         if (bottomSheetBehavior != null) bottomSheetBehavior.setState(BottomSheetBehavior.STATE_HIDDEN);
         fullscreenOverlay.setAlpha(0f);
         fullscreenOverlay.setVisibility(View.VISIBLE);
-        fullscreenOverlay.animate().alpha(1f).setDuration(250).withEndAction(() -> {
-            // Nach dem Einblenden den Timer starten
-            if (isStoryModeActive) {
-                startStoryAutoPlay();
-            }
-        }).start();
+        fullscreenOverlay.animate().alpha(1f).setDuration(250).start();
     }
 
     private void fetchSingleAssetDetails(String assetId) {
@@ -3561,9 +3813,14 @@ public class FotosFragment extends Fragment {
     }
 
     private void closeFullscreen() {
-        // --- NEU: Timer stoppen, wenn Vollbild geschlossen wird ---
-        storyAutoPlayHandler.removeCallbacks(storyAutoPlayRunnable);
         isStoryModeActive = false;
+        if (storyAnimator != null) {
+            storyAnimator.cancel();
+            storyAnimator = null;
+        }
+        if (storyProgressContainer != null) {
+            storyProgressContainer.setVisibility(View.GONE);
+        }
 
         if (bottomSheetBehavior != null) bottomSheetBehavior.setState(BottomSheetBehavior.STATE_HIDDEN);
         if (fullscreenOverlay != null) {
@@ -3639,7 +3896,6 @@ public class FotosFragment extends Fragment {
         }
     }
 
-    // --- NEU: Bulletproof JSON-Parser für Memories Titel ---
     private void fetchMemories() {
         if (currentApiUrl.isEmpty() || currentApiKey.isEmpty()) return;
 
@@ -3687,7 +3943,6 @@ public class FotosFragment extends Fragment {
 
                             memory.id = obj.has("id") && !obj.get("id").isJsonNull() ? obj.get("id").getAsString() : "";
 
-                            // --- SAUBERER FIX: Prio 1 (title), Prio 2 (data.title), Prio 3 (name) ---
                             String title = "";
 
                             if (obj.has("title") && !obj.get("title").isJsonNull()) {
@@ -3705,14 +3960,12 @@ public class FotosFragment extends Fragment {
                                 title = obj.get("name").getAsString().trim();
                             }
 
-                            // Nur wenn die API WIRKLICH nichts Brauchbares liefert, greift das Fallback
                             if (title.isEmpty()) {
                                 title = "Erinnerung";
                             }
 
                             memory.title = title;
 
-                            // 3. Bilder auslesen
                             if (obj.has("assets") && obj.get("assets").isJsonArray()) {
                                 memory.assets = new Gson().fromJson(obj.getAsJsonArray("assets"), new TypeToken<List<ImmichAsset>>(){}.getType());
                             }
@@ -3728,7 +3981,6 @@ public class FotosFragment extends Fragment {
                                     recyclerViewMemories.setVisibility(View.VISIBLE);
 
                                     MemoriesAdapter memAdapter = new MemoriesAdapter(getContext(), memoriesList, cleanBaseUrl, currentApiKey, memory -> {
-                                        // --- NEU: Story Flag (true) an openFullscreen senden ---
                                         openFullscreen(memory.assets, 0, true);
                                     });
                                     recyclerViewMemories.setAdapter(memAdapter);
@@ -3985,7 +4237,6 @@ public class FotosFragment extends Fragment {
         currentFotosAdapter = new FotosAdapter(getContext(), groupedItems, baseUrl, apiKey,
                 clickedAsset -> {
                     int index = sortedAssets.indexOf(clickedAsset);
-                    // --- NORMALE BILDER: Kein Auto-Play (Story Mode = false) ---
                     openFullscreen(sortedAssets, index, false);
                 },
                 selectedCount -> {
@@ -3995,6 +4246,7 @@ public class FotosFragment extends Fragment {
                                 if (layoutSelectionBar != null) layoutSelectionBar.setVisibility(View.VISIBLE);
                                 if (layoutSelectionBottomBar != null) layoutSelectionBottomBar.setVisibility(View.VISIBLE);
                                 if (tvSelectionCount != null) tvSelectionCount.setText(selectedCount + (selectedCount == 1 ? " ausgewählt" : " ausgewählt"));
+                                updateSelectionBottomBarUI();
                             } else {
                                 if (layoutSelectionBar != null) layoutSelectionBar.setVisibility(View.GONE);
                                 if (layoutSelectionBottomBar != null) layoutSelectionBottomBar.setVisibility(View.GONE);
@@ -4036,6 +4288,8 @@ public class FotosFragment extends Fragment {
         public interface SwipeListener {
             void onSwipeUp();
             void onSwipeDown();
+            void onSingleTap(float x, float width);
+            void onLongPress();
         }
 
         private final SwipeListener swipeListener;
@@ -4119,6 +4373,42 @@ public class FotosFragment extends Fragment {
                 } else if (holder.btnPlay != null) {
                     holder.btnPlay.setVisibility(View.GONE);
                 }
+            }
+
+            // Taps robust erfassen für Menü und Weiterschalten
+            holder.imageView.setOnViewTapListener((view, x, y) -> {
+                swipeListener.onSingleTap(x, view.getWidth());
+            });
+
+            holder.imageView.setOnPhotoTapListener((view, x, y) -> {
+                swipeListener.onSingleTap(x * view.getWidth(), view.getWidth());
+            });
+
+            // Long Press sicher anbinden für den Pause-Modus
+            holder.imageView.setOnLongClickListener(v -> {
+                swipeListener.onLongPress();
+                return true;
+            });
+
+            if (holder.videoView != null) {
+                holder.videoView.setOnTouchListener(new View.OnTouchListener() {
+                    private long downTime;
+                    @Override
+                    public boolean onTouch(View v, MotionEvent event) {
+                        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                            downTime = System.currentTimeMillis();
+                        } else if (event.getAction() == MotionEvent.ACTION_UP) {
+                            if (System.currentTimeMillis() - downTime < 200) {
+                                swipeListener.onSingleTap(event.getX(), v.getWidth());
+                            }
+                        }
+                        return false;
+                    }
+                });
+                holder.videoView.setOnLongClickListener(v -> {
+                    swipeListener.onLongPress();
+                    return true;
+                });
             }
 
             holder.imageView.setOnSingleFlingListener((MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) -> {

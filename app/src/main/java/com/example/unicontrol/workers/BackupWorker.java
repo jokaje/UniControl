@@ -14,10 +14,12 @@ import android.os.Looper;
 import android.provider.MediaStore;
 import android.util.Log;
 import android.widget.Toast;
+import android.content.pm.ServiceInfo;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
 import androidx.work.ExistingWorkPolicy;
+import androidx.work.ForegroundInfo;
 import androidx.work.OneTimeWorkRequest;
 import androidx.work.WorkManager;
 import androidx.work.Worker;
@@ -314,9 +316,47 @@ public class BackupWorker extends Worker {
     }
 
     @NonNull
+    private ForegroundInfo createForegroundInfo() {
+        Context context = getApplicationContext();
+        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "Cloud Backup",
+                    NotificationManager.IMPORTANCE_LOW
+            );
+            channel.setDescription("Sichert im Hintergrund die neuesten Fotos.");
+            if (manager != null) {
+                manager.createNotificationChannel(channel);
+            }
+        }
+
+        Notification notification = new NotificationCompat.Builder(context, CHANNEL_ID)
+                .setContentTitle("UniControl Backup")
+                .setContentText("Fotos werden im Hintergrund gesichert...")
+                .setSmallIcon(android.R.drawable.ic_popup_sync)
+                .setOngoing(true)
+                .build();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return new ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+        } else {
+            return new ForegroundInfo(NOTIFICATION_ID, notification);
+        }
+    }
+
+    @NonNull
     @Override
     public Result doWork() {
         Log.d("UniControlBackup", "Hintergrund-Backup Job gestartet!");
+
+        // WICHTIG: Hiermit teilen wir Android mit, dass dieser Worker im Vordergrund läuft
+        try {
+            setForegroundAsync(createForegroundInfo()).get();
+        } catch (Exception e) {
+            Log.e("UniControlBackup", "Fehler beim Setzen als Foreground Service", e);
+        }
 
         Context context = getApplicationContext();
         SharedPreferences prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
@@ -343,7 +383,6 @@ public class BackupWorker extends Worker {
             String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, UUID.randomUUID().toString());
             String currentSsid = NetworkUtils.getCurrentSsid(context);
 
-            // NEU: Wir laden die Ignorier-Liste, die du durch das Löschen in der App befüllst
             Set<String> blacklist = prefs.getStringSet("blacklisted_local_assets", new HashSet<>());
 
             String targetUrl = "";
@@ -388,8 +427,6 @@ public class BackupWorker extends Worker {
                         while (cursor.moveToNext()) {
                             String _id = cursor.getString(idColumn);
 
-                            // NEU: Wenn das Bild auf deiner persönlichen Blacklist steht,
-                            // dann wird es nicht mal als Kandidat für das Backup in Betracht gezogen!
                             if (blacklist.contains(_id)) {
                                 continue;
                             }

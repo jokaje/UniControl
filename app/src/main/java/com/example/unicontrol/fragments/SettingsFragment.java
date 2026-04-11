@@ -285,6 +285,8 @@ public class SettingsFragment extends Fragment {
                 .setRequiresBatteryNotLow(true)
                 .build();
 
+        // REPLACE Policy ist hier korrekt, da es eine OneTimeWorkRequest ist,
+        // die sich selbst wieder in die Schlange einreiht.
         OneTimeWorkRequest backupRequest = new OneTimeWorkRequest.Builder(BackupWorker.class)
                 .setInitialDelay(timeDiff, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .setConstraints(constraints)

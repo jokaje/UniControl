@@ -46,6 +46,13 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            xmlns:tools="http://schemas.android.com/tools"
+            tools:node="merge" />
+
+
         <!-- Der FileProvider zum sicheren Teilen von echten Bildern und Videos -->
         <provider
             android:name="androidx.core.content.FileProvider"
