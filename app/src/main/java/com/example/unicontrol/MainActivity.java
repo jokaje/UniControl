@@ -4,18 +4,31 @@ import android.Manifest;
 import android.animation.ArgbEvaluator;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
+import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.net.Uri;
+import android.nfc.NdefMessage;
+import android.nfc.NdefRecord;
+import android.nfc.NfcAdapter;
+import android.nfc.Tag;
+import android.nfc.tech.Ndef;
+import android.nfc.tech.NdefFormatable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Parcelable;
+import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.LinearInterpolator;
 import android.widget.ImageView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -35,6 +48,12 @@ import com.example.unicontrol.fragments.FotosFragment;
 import com.example.unicontrol.fragments.HomeFragment;
 import com.example.unicontrol.fragments.SettingsFragment;
 import com.example.unicontrol.fragments.WebUiFragment;
+import com.example.unicontrol.utils.NetworkUtils;
+
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -51,9 +70,12 @@ public class MainActivity extends AppCompatActivity {
 
     private ObjectAnimator uploadAnimator;
 
-    // Getrennte Status-Tracker für die Samsung-Optimierung
     private boolean isManualBackupRunning = false;
     private boolean isAutoBackupRunning = false;
+
+    // NFC Variablen
+    private NfcAdapter nfcAdapter;
+    private PendingIntent pendingIntent;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -74,7 +96,6 @@ public class MainActivity extends AppCompatActivity {
         bottomNav.setBackgroundColor(currentColor);
         bottomNav.setBackgroundTintList(null);
 
-        // --- NEU: Initiale Farbe der Icons anhand der Hintergrundfarbe setzen ---
         updateBottomNavColors(bottomNav, currentColor);
 
         if (savedInstanceState == null) {
@@ -131,12 +152,10 @@ public class MainActivity extends AppCompatActivity {
             splashOverlay.setVisibility(View.GONE);
         }
 
-        // REPARIERT FÜR SAMSUNG: Getrennte, saubere Beobachter
         WorkManager.getInstance(this).getWorkInfosForUniqueWorkLiveData("ImmichManualBackup")
                 .observe(this, workInfos -> {
                     isManualBackupRunning = false;
                     for (WorkInfo workInfo : workInfos) {
-                        // Wir ignorieren ENQUEUED komplett, da Samsung Jobs oft stundenlang parkt
                         if (workInfo.getState() == WorkInfo.State.RUNNING) {
                             isManualBackupRunning = true;
                             break;
@@ -156,15 +175,214 @@ public class MainActivity extends AppCompatActivity {
                     }
                     updateAnimationState();
                 });
+
+        // NFC Initialisierung
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this);
+        if (nfcAdapter != null) {
+            Intent nfcIntent = new Intent(this, getClass()).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                flags |= PendingIntent.FLAG_MUTABLE;
+            }
+            pendingIntent = PendingIntent.getActivity(this, 0, nfcIntent, flags);
+        }
+
+        handleNfcIntent(getIntent());
     }
 
-    // --- NEU: Funktion zur intelligenten Kontrast-Anpassung der Bottom-Bar-Icons ---
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (nfcAdapter != null && pendingIntent != null) {
+            nfcAdapter.enableForegroundDispatch(this, pendingIntent, null, null);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (nfcAdapter != null) {
+            nfcAdapter.disableForegroundDispatch(this);
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleNfcIntent(intent);
+    }
+
+    private void handleNfcIntent(Intent intent) {
+        if (intent == null || intent.getAction() == null) return;
+
+        if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(intent.getAction()) ||
+                NfcAdapter.ACTION_TAG_DISCOVERED.equals(intent.getAction()) ||
+                NfcAdapter.ACTION_TECH_DISCOVERED.equals(intent.getAction())) {
+
+            Tag tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
+            if (tag != null) {
+                SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+                String writeId = prefs.getString("nfc_write_mode_id", null);
+
+                // --- SCHREIB-MODUS ---
+                if (writeId != null) {
+                    writeNfcTag(tag, writeId);
+                    prefs.edit().remove("nfc_write_mode_id").apply();
+                    return;
+                }
+
+                // --- LESE-MODUS ---
+                String tagId = bytesToHex(tag.getId());
+                String haTagId = extractHaTagIdFromNdef(intent);
+
+                // Wenn ein formatierter Tag gefunden wird, nutze dessen HA-ID anstatt der Hardware-ID
+                if (haTagId != null && !haTagId.isEmpty()) {
+                    tagId = haTagId;
+                    Toast.makeText(this, "HA-Tag erkannt!\nID: " + tagId + "\nSende an Home Assistant...", Toast.LENGTH_LONG).show();
+                } else {
+                    Toast.makeText(this, "Roh-Tag erkannt!\nHardware-ID: " + tagId + "\nSende an Home Assistant...", Toast.LENGTH_LONG).show();
+                }
+
+                sendTagToHomeAssistant(tagId);
+            }
+        }
+    }
+
+    // --- NFC Tag Formatieren & Beschreiben ---
+    private void writeNfcTag(Tag tag, String tagId) {
+        try {
+            NdefMessage ndefMessage = createNdefMessage(tagId);
+            Ndef ndef = Ndef.get(tag);
+
+            if (ndef == null) {
+                // Versuche den Tag neu zu formatieren, falls er komplett leer ist
+                NdefFormatable formatable = NdefFormatable.get(tag);
+                if (formatable != null) {
+                    formatable.connect();
+                    formatable.format(ndefMessage);
+                    formatable.close();
+                    runOnUiThread(() -> Toast.makeText(this, "NFC-Tag formatiert & beschrieben! ✅\nNeue ID: " + tagId, Toast.LENGTH_LONG).show());
+                } else {
+                    runOnUiThread(() -> Toast.makeText(this, "Tag unterstützt kein NDEF Format.", Toast.LENGTH_LONG).show());
+                }
+                return;
+            }
+
+            ndef.connect();
+            if (!ndef.isWritable()) {
+                runOnUiThread(() -> Toast.makeText(this, "Fehler: NFC-Tag ist schreibgeschützt!", Toast.LENGTH_LONG).show());
+                ndef.close();
+                return;
+            }
+
+            ndef.writeNdefMessage(ndefMessage);
+            ndef.close();
+            runOnUiThread(() -> Toast.makeText(this, "NFC-Tag erfolgreich beschrieben! ✅\nNeue ID: " + tagId, Toast.LENGTH_LONG).show());
+
+        } catch (Exception e) {
+            runOnUiThread(() -> Toast.makeText(this, "Fehler beim Beschreiben des Tags.", Toast.LENGTH_LONG).show());
+            Log.e("NFC_WRITE", "Error writing tag", e);
+        }
+    }
+
+    private NdefMessage createNdefMessage(String tagId) {
+        // 1. Record: Die originale Home Assistant URL, damit Home Assistant den Tag im System erkennt
+        String url = "https://www.home-assistant.io/tag/" + tagId;
+        NdefRecord uriRecord = NdefRecord.createUri(url);
+
+        // 2. Record: Der AAR zwingt das Android-System, UniControl zu öffnen (statt den Play Store für die offizielle HA App)
+        NdefRecord aarRecord = NdefRecord.createApplicationRecord(getPackageName());
+
+        return new NdefMessage(new NdefRecord[]{uriRecord, aarRecord});
+    }
+
+    private String extractHaTagIdFromNdef(Intent intent) {
+        Parcelable[] rawMsgs = intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES);
+        if (rawMsgs != null) {
+            for (Parcelable rawMsg : rawMsgs) {
+                NdefMessage msg = (NdefMessage) rawMsg;
+                for (NdefRecord record : msg.getRecords()) {
+                    Uri uri = record.toUri();
+                    if (uri != null && uri.toString().startsWith("https://www.home-assistant.io/tag/")) {
+                        return uri.getLastPathSegment(); // Extrahiert exakt die HA Tag-UUID
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02X", b));
+        }
+        return sb.toString();
+    }
+
+    private void sendTagToHomeAssistant(String tagId) {
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+                String token = prefs.getString(SettingsFragment.KEY_HOME_TOKEN, "");
+                if (token.isEmpty()) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Fehler: Kein Home Assistant Token hinterlegt!", Toast.LENGTH_LONG).show());
+                    return;
+                }
+
+                String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
+                String localUrl = prefs.getString(SettingsFragment.KEY_HOME_LOCAL, "");
+                String publicUrl = prefs.getString(SettingsFragment.KEY_HOME_PUBLIC, "");
+                String currentSsid = NetworkUtils.getCurrentSsid(this);
+
+                String targetUrl = "";
+                if (!savedSsid.isEmpty() && currentSsid != null && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) {
+                    targetUrl = localUrl;
+                } else if (!publicUrl.isEmpty()) {
+                    targetUrl = publicUrl;
+                } else {
+                    targetUrl = localUrl;
+                }
+
+                if (targetUrl.isEmpty()) return;
+
+                if (!targetUrl.startsWith("http")) targetUrl = "http://" + targetUrl;
+                if (targetUrl.endsWith("/")) targetUrl = targetUrl.substring(0, targetUrl.length() - 1);
+
+                URL url = new URL(targetUrl + "/api/events/tag_scanned");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Authorization", "Bearer " + token);
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setDoOutput(true);
+
+                String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, "android-app");
+                String jsonBody = "{\"tag_id\": \"" + tagId + "\", \"device_id\": \"" + deviceId + "\"}";
+
+                OutputStream os = conn.getOutputStream();
+                os.write(jsonBody.getBytes("UTF-8"));
+                os.flush();
+                os.close();
+
+                int responseCode = conn.getResponseCode();
+                if (responseCode == 200 || responseCode == 201) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "NFC Event an Home Assistant gesendet! ✅", Toast.LENGTH_SHORT).show());
+                } else {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Fehler beim NFC-Senden (" + responseCode + ")", Toast.LENGTH_SHORT).show());
+                }
+                conn.disconnect();
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "NFC Netzwerkfehler", Toast.LENGTH_SHORT).show());
+                Log.e("NFC", "HA API Error", e);
+            }
+        });
+    }
+
     private void updateBottomNavColors(BottomNavigationView bottomNav, int bgColor) {
         boolean isDark = ColorUtils.calculateLuminance(bgColor) < 0.5;
 
-        // Wenn Hintergrund dunkel ist -> Weiße Icons. Wenn hell -> Dunkelgraue Icons.
         int checkedColor = isDark ? Color.WHITE : Color.parseColor("#333333");
-        // Unausgewählte Tabs machen wir leicht transparent, damit der ausgewählte Tab heraussticht
         int uncheckedColor = isDark ? Color.argb(150, 255, 255, 255) : Color.argb(120, 51, 51, 51);
 
         ColorStateList iconColorStates = new ColorStateList(
@@ -181,7 +399,6 @@ public class MainActivity extends AppCompatActivity {
         bottomNav.setItemTextColor(iconColorStates);
     }
 
-    // Führt die Status beider Worker zusammen, ohne dass sie sich überschreiben
     private void updateAnimationState() {
         setUploadAnimation(isManualBackupRunning || isAutoBackupRunning);
     }
@@ -237,7 +454,6 @@ public class MainActivity extends AppCompatActivity {
         SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, MODE_PRIVATE);
         String hex = prefs.getString(key, defaultHex);
 
-        // --- NEU: Crash-Schutz, falls der User eine Farbe ohne '#' eingibt ---
         if (hex != null && !hex.startsWith("#")) {
             hex = "#" + hex;
         }
@@ -260,9 +476,7 @@ public class MainActivity extends AppCompatActivity {
         colorAnimation.setDuration(300);
         colorAnimation.addUpdateListener(animator -> {
             int animatedColor = (int) animator.getAnimatedValue();
-            // Ändert den Hintergrund der Bar...
             bottomNav.setBackgroundColor(animatedColor);
-            // ...und passt die Farbe der Icons fließend WÄHREND der Animation an!
             updateBottomNavColors(bottomNav, animatedColor);
         });
         colorAnimation.start();

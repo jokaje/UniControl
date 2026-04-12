@@ -158,7 +158,6 @@ public class SettingsFragment extends Fragment {
                 if (result != PackageManager.PERMISSION_GRANTED) { allGranted = false; break; }
             }
             if (allGranted) {
-                // Prüfen, ob wir nach Schritt 1 (Vordergrund) noch Schritt 2 (Hintergrund) brauchen
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                     Toast.makeText(getContext(), "Schritt 1 fertig! Klicke den Schalter nochmal für die Hintergrund-Erlaubnis.", Toast.LENGTH_LONG).show();
                 } else {
@@ -285,8 +284,6 @@ public class SettingsFragment extends Fragment {
                 .setRequiresBatteryNotLow(true)
                 .build();
 
-        // REPLACE Policy ist hier korrekt, da es eine OneTimeWorkRequest ist,
-        // die sich selbst wieder in die Schlange einreiht.
         OneTimeWorkRequest backupRequest = new OneTimeWorkRequest.Builder(BackupWorker.class)
                 .setInitialDelay(timeDiff, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .setConstraints(constraints)
@@ -563,22 +560,36 @@ public class SettingsFragment extends Fragment {
             etToken.setText(prefs.getString(KEY_HOME_TOKEN, ""));
             switchTracking.setChecked(prefs.getBoolean(KEY_LOCATION_TRACKING_ENABLED, false));
 
-            // --- REPARIERT FÜR ANDROID 11+: Saubere, 2-stufige Rechte-Abfrage ---
             switchTracking.setOnCheckedChangeListener((buttonView, isChecked) -> {
                 if (isChecked) {
                     if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                        // Schritt 1: Zuerst nur den normalen Vordergrund-Standort anfragen
-                        switchTracking.setChecked(false); // Aus lassen, bis der Nutzer bestätigt
+                        switchTracking.setChecked(false);
                         requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_CODE_LOCATION);
 
                     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                        // Schritt 2: Wenn der Vordergrund erlaubt ist, den Hintergrund gezielt anfragen
-                        switchTracking.setChecked(false); // Aus für den 2. Schritt
+                        switchTracking.setChecked(false);
                         Toast.makeText(getContext(), "WICHTIG: Bitte wähle gleich 'Immer zulassen' für das Hintergrund-Tracking!", Toast.LENGTH_LONG).show();
                         requestPermissions(new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}, REQUEST_CODE_LOCATION);
                     }
                 }
             });
+
+            // --- NEU: NFC Schreib Button ---
+            MaterialButton btnWriteNfc = new MaterialButton(getContext());
+            btnWriteNfc.setText("NFC Tag für UniControl beschreiben");
+            btnWriteNfc.setTextColor(Color.WHITE);
+            btnWriteNfc.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#8CA8B3"))); // Dezentes Grau-Blau
+            btnWriteNfc.setCornerRadius(60);
+            LinearLayout.LayoutParams nfcParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            nfcParams.setMargins(originalParams.leftMargin, 0, originalParams.rightMargin, 48);
+            btnWriteNfc.setLayoutParams(nfcParams);
+            btnWriteNfc.setOnClickListener(v -> {
+                String newTagId = UUID.randomUUID().toString();
+                prefs.edit().putString("nfc_write_mode_id", newTagId).apply();
+                Toast.makeText(getContext(), "Bitte halte jetzt einen unbeschriebenen NFC Tag an die Rückseite deines Handys!", Toast.LENGTH_LONG).show();
+                bottomSheetDialog.dismiss();
+            });
+            parentLayout.addView(btnWriteNfc, btnIndex + 2);
 
             btnSave.setOnClickListener(v -> {
                 SharedPreferences.Editor editor = prefs.edit();

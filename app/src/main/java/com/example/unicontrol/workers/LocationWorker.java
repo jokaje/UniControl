@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationManager;
+import android.os.Build;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -14,7 +15,6 @@ import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
 import com.example.unicontrol.fragments.SettingsFragment;
-import com.example.unicontrol.utils.NetworkUtils;
 
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -38,6 +38,7 @@ public class LocationWorker extends Worker {
         String publicUrl = prefs.getString(SettingsFragment.KEY_HOME_PUBLIC, "");
         String localUrl = prefs.getString(SettingsFragment.KEY_HOME_LOCAL, "");
         String token = prefs.getString(KEY_HOME_TOKEN, "");
+        String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, "unknown_device");
 
         // Wenn wir keinen Token haben, können wir uns nicht bei Home Assistant anmelden
         if (token.isEmpty()) {
@@ -71,7 +72,12 @@ public class LocationWorker extends Worker {
                 double lon = location.getLongitude();
                 float accuracy = location.getAccuracy();
 
-                sendLocationToHomeAssistant(cleanBaseUrl, token, lat, lon, accuracy);
+                // Generiere einen einzigartigen, bereinigten Gerätenamen, z.B. "unicontrol_pixel_7_a1b2"
+                String safeModelName = Build.MODEL.replaceAll("[^a-zA-Z0-9]", "_").toLowerCase();
+                String shortId = deviceId.length() >= 4 ? deviceId.substring(0, 4) : "1234";
+                String devId = "unicontrol_" + safeModelName + "_" + shortId;
+
+                sendLocationToHomeAssistant(cleanBaseUrl, token, devId, lat, lon, accuracy);
             }
             return Result.success();
 
@@ -81,26 +87,22 @@ public class LocationWorker extends Worker {
         }
     }
 
-    private void sendLocationToHomeAssistant(String baseUrl, String token, double lat, double lon, float accuracy) {
+    private void sendLocationToHomeAssistant(String baseUrl, String token, String devId, double lat, double lon, float accuracy) {
         HttpURLConnection conn = null;
         try {
-            // Wir legen das Handy als "device_tracker.unicontrol_handy" in Home Assistant an
-            URL url = new URL(baseUrl + "/api/states/device_tracker.unicontrol_handy");
+            // FIX: Wir nutzen jetzt den offiziellen Device Tracker Service von Home Assistant!
+            URL url = new URL(baseUrl + "/api/services/device_tracker/see");
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Authorization", "Bearer " + token);
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
 
-            // Das JSON-Paket, das Home Assistant versteht
+            // FIX: Dieses JSON lässt Home Assistant die Zone (Home/Work/Unterwegs) selbst anhand der GPS-Daten berechnen
             String jsonBody = "{"
-                    + "\"state\": \"not_home\", " // Home Assistant berechnet anhand der Koordinaten automatisch, ob du "home" bist!
-                    + "\"attributes\": {"
-                    + "\"latitude\": " + lat + ", "
-                    + "\"longitude\": " + lon + ", "
-                    + "\"gps_accuracy\": " + accuracy + ", "
-                    + "\"friendly_name\": \"UniControl Handy\""
-                    + "}"
+                    + "\"dev_id\": \"" + devId + "\", "
+                    + "\"gps\": [" + lat + ", " + lon + "], "
+                    + "\"gps_accuracy\": " + accuracy
                     + "}";
 
             OutputStream os = conn.getOutputStream();
@@ -110,7 +112,7 @@ public class LocationWorker extends Worker {
 
             int responseCode = conn.getResponseCode();
             if (responseCode == 200 || responseCode == 201) {
-                Log.d("UniControlLocation", "Standort erfolgreich an Home Assistant gesendet!");
+                Log.d("UniControlLocation", "Standort erfolgreich an HA gesendet: " + devId);
             } else {
                 Log.e("UniControlLocation", "Fehler beim Senden des Standorts: " + responseCode);
             }
