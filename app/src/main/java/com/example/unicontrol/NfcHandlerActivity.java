@@ -28,10 +28,11 @@ public class NfcHandlerActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Verarbeite den NFC Scan
+        // Verarbeitet den Scan sofort
         handleNfcIntent(getIntent());
 
-        // Schließe die unsichtbare Activity in der gleichen Millisekunde
+        // Schließt die unsichtbare Geister-Activity in derselben Millisekunde wieder,
+        // sodass sie den User nicht stört.
         finish();
     }
 
@@ -49,9 +50,9 @@ public class NfcHandlerActivity extends Activity {
 
                 if (haTagId != null && !haTagId.isEmpty()) {
                     tagId = haTagId;
-                    Toast.makeText(this, "HA-Tag (Background) erkannt!\nSende an Home Assistant...", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Home Assistant Tag erkannt!\nSende Aktion im Hintergrund...", Toast.LENGTH_SHORT).show();
                 } else {
-                    Toast.makeText(this, "Roh-Tag (Background) erkannt!\nSende an Home Assistant...", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Roh-Tag erkannt!\nSende Aktion im Hintergrund...", Toast.LENGTH_SHORT).show();
                 }
 
                 sendTagToHomeAssistant(tagId);
@@ -126,9 +127,9 @@ public class NfcHandlerActivity extends Activity {
 
                 int responseCode = conn.getResponseCode();
                 if (responseCode == 200 || responseCode == 201) {
-                    runOnUiThread(() -> Toast.makeText(NfcHandlerActivity.this, "NFC Event an Home Assistant gesendet! ✅", Toast.LENGTH_SHORT).show());
+                    runOnUiThread(() -> Toast.makeText(NfcHandlerActivity.this, "Aktion erfolgreich gesendet! ✅", Toast.LENGTH_SHORT).show());
                 } else {
-                    runOnUiThread(() -> Toast.makeText(NfcHandlerActivity.this, "Fehler beim NFC-Senden (" + responseCode + ")", Toast.LENGTH_SHORT).show());
+                    runOnUiThread(() -> Toast.makeText(NfcHandlerActivity.this, "Fehler beim Senden (" + responseCode + ")", Toast.LENGTH_SHORT).show());
                 }
                 conn.disconnect();
             } catch (Exception e) {

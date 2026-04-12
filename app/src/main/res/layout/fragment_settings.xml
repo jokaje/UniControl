@@ -1,45 +1,363 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:padding="24dp">
+    android:fillViewport="true"
+    android:background="@android:color/transparent">
 
-    <Button
-        android:id="@+id/btn_open_network_settings"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:backgroundTint="#8CA8B3"
+        android:orientation="vertical"
         android:padding="16dp"
-        android:text="Netzwerk Einstellungen"
-        android:textColor="#FFFFFF"
-        android:textSize="18sp"
-        android:textStyle="bold" />
+        android:clipToPadding="false"
+        android:paddingBottom="120dp">
 
-    <Button
-        android:id="@+id/btn_open_design_settings"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:backgroundTint="#8CA8B3"
-        android:padding="16dp"
-        android:text="Design &amp; Farben anpassen"
-        android:textColor="#FFFFFF"
-        android:textSize="18sp"
-        android:textStyle="bold" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Einstellungen"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_marginBottom="24dp"
+            android:layout_marginTop="16dp"/>
 
-    <!-- NEU: Der Back-Up Button -->
-    <Button
-        android:id="@+id/btn_open_backup_settings"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:backgroundTint="#8CA8B3"
-        android:padding="16dp"
-        android:text="Back-Up Einstellungen"
-        android:textColor="#FFFFFF"
-        android:textSize="18sp"
-        android:textStyle="bold" />
+        <!-- CARD 1: Home Assistant -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="20dp"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="24dp"
+            app:cardBackgroundColor="#FFFFFF">
 
-</LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🏠 Home Assistant"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="16dp"/>
+
+                <EditText
+                    android:id="@+id/et_home_local"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Lokale IP (z.B. 192.168.x.x:8123)"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/et_home_public"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Public URL (z.B. https://ha.deinhaus.de)"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/et_home_token"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="🔑 Langlebiger Token"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="16dp"
+                    android:inputType="textPassword"
+                    android:textSize="14sp" />
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switch_tracking"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🌍 Hintergrund-Ortung senden"
+                    android:textColor="#333333"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="16dp"
+                    app:thumbTint="#8CA8B3"
+                    app:trackTint="#D0D0D0"/>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_write_nfc"
+                    android:layout_width="match_parent"
+                    android:layout_height="55dp"
+                    android:text="NFC Tag beschreiben"
+                    android:textColor="@color/white"
+                    app:backgroundTint="#8CA8B3"
+                    app:cornerRadius="30dp"
+                    app:elevation="0dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- CARD 2: Immich Foto-Cloud -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="20dp"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="24dp"
+            app:cardBackgroundColor="#FFFFFF">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="☁️ Immich Foto-Cloud"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="16dp"/>
+
+                <EditText
+                    android:id="@+id/et_fotos_local"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Lokale IP (z.B. 192.168.x.x:2283)"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/et_fotos_public"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Public URL (z.B. https://fotos.haus.de)"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/et_fotos_api_key"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="🔑 API-Key"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="16dp"
+                    android:inputType="textPassword"
+                    android:textSize="14sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_open_backup_settings"
+                    android:layout_width="match_parent"
+                    android:layout_height="55dp"
+                    android:text="Backup-Ordner &amp; Zeitplan"
+                    android:textColor="@color/white"
+                    app:backgroundTint="#F49AC2"
+                    app:cornerRadius="30dp"
+                    app:elevation="0dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- CARD 3: Weitere Dienste & Netzwerk -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="20dp"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="24dp"
+            app:cardBackgroundColor="#FFFFFF">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🌐 Netzwerk &amp; Web"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="16dp"/>
+
+                <EditText
+                    android:id="@+id/et_home_ssid"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="📶 Heim-WLAN Name (SSID)"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="24dp"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Echo Show Integration"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#666666"
+                    android:layout_marginBottom="8dp"/>
+
+                <EditText
+                    android:id="@+id/et_echo_local"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Echo Local URL"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/et_echo_public"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Echo Public URL"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="24dp"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Web UI Integration"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#666666"
+                    android:layout_marginBottom="8dp"/>
+
+                <EditText
+                    android:id="@+id/et_web_local"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Web Local URL"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/et_web_public"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Web Public URL"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- CARD 4: Design & Farben -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="20dp"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="24dp"
+            app:cardBackgroundColor="#FFFFFF">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🎨 Design &amp; Farben"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="16dp"/>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Home" android:textColor="#333" android:gravity="center_vertical"/>
+                    <EditText android:id="@+id/et_color_home" android:layout_width="120dp" android:layout_height="wrap_content" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F5F5F5" android:padding="12dp" android:hint="#B2D3C2" android:textSize="14sp" android:gravity="center"/>
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Fotos" android:textColor="#333" android:gravity="center_vertical"/>
+                    <EditText android:id="@+id/et_color_fotos" android:layout_width="120dp" android:layout_height="wrap_content" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F5F5F5" android:padding="12dp" android:hint="#F49AC2" android:textSize="14sp" android:gravity="center"/>
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Echo" android:textColor="#333" android:gravity="center_vertical"/>
+                    <EditText android:id="@+id/et_color_echo" android:layout_width="120dp" android:layout_height="wrap_content" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F5F5F5" android:padding="12dp" android:hint="#AEC6CF" android:textSize="14sp" android:gravity="center"/>
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Web UI" android:textColor="#333" android:gravity="center_vertical"/>
+                    <EditText android:id="@+id/et_color_web" android:layout_width="120dp" android:layout_height="wrap_content" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F5F5F5" android:padding="12dp" android:hint="#FDFD96" android:textSize="14sp" android:gravity="center"/>
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Settings" android:textColor="#333" android:gravity="center_vertical"/>
+                    <EditText android:id="@+id/et_color_settings" android:layout_width="120dp" android:layout_height="wrap_content" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F5F5F5" android:padding="12dp" android:hint="#EAEAEA" android:textSize="14sp" android:gravity="center"/>
+                </LinearLayout>
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_save_all"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="💾 Einstellungen speichern"
+            android:textColor="@color/white"
+            android:textSize="16sp"
+            app:backgroundTint="#333333"
+            app:cornerRadius="30dp"
+            app:elevation="4dp"/>
+
+    </LinearLayout>
+</ScrollView>

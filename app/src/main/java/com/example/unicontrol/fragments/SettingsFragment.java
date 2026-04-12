@@ -9,6 +9,7 @@ import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -17,6 +18,7 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -26,8 +28,10 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.ColorUtils;
 import androidx.fragment.app.Fragment;
 import androidx.work.Constraints;
 import androidx.work.Data;
@@ -117,11 +121,215 @@ public class SettingsFragment extends Fragment {
             prefs.edit().putString(KEY_DEVICE_ID, UUID.randomUUID().toString()).apply();
         }
 
-        view.findViewById(R.id.btn_open_network_settings).setOnClickListener(v -> showNetworkSettingsBottomSheet());
-        view.findViewById(R.id.btn_open_design_settings).setOnClickListener(v -> showDesignSettingsBottomSheet());
+        // --- BINDING DER NEUEN DASHBOARD UI ELEMENTE ---
+        EditText etSsid = view.findViewById(R.id.et_home_ssid);
+        EditText etEchoLocal = view.findViewById(R.id.et_echo_local);
+        EditText etEchoPublic = view.findViewById(R.id.et_echo_public);
+        EditText etWebLocal = view.findViewById(R.id.et_web_local);
+        EditText etWebPublic = view.findViewById(R.id.et_web_public);
+        EditText etHomeLocal = view.findViewById(R.id.et_home_local);
+        EditText etHomePublic = view.findViewById(R.id.et_home_public);
+        EditText etHomeToken = view.findViewById(R.id.et_home_token);
+        EditText etFotosLocal = view.findViewById(R.id.et_fotos_local);
+        EditText etFotosPublic = view.findViewById(R.id.et_fotos_public);
+        EditText etFotosApiKey = view.findViewById(R.id.et_fotos_api_key);
 
-        Button btnOpenBackup = view.findViewById(R.id.btn_open_backup_settings);
-        if (btnOpenBackup != null) btnOpenBackup.setOnClickListener(v -> checkPermissionsAndOpenBackupSettings());
+        EditText etColorHome = view.findViewById(R.id.et_color_home);
+        EditText etColorFotos = view.findViewById(R.id.et_color_fotos);
+        EditText etColorEcho = view.findViewById(R.id.et_color_echo);
+        EditText etColorWeb = view.findViewById(R.id.et_color_web);
+        EditText etColorSettings = view.findViewById(R.id.et_color_settings);
+
+        SwitchCompat switchTracking = view.findViewById(R.id.switch_tracking);
+        MaterialButton btnWriteNfc = view.findViewById(R.id.btn_write_nfc);
+        MaterialButton btnOpenBackup = view.findViewById(R.id.btn_open_backup_settings);
+        MaterialButton btnSaveAll = view.findViewById(R.id.btn_save_all);
+
+        // Werte aus SharedPreferences laden
+        etSsid.setText(prefs.getString(KEY_WIFI_SSID, ""));
+        etEchoLocal.setText(prefs.getString(KEY_ECHO_LOCAL, ""));
+        etEchoPublic.setText(prefs.getString(KEY_ECHO_PUBLIC, ""));
+        etWebLocal.setText(prefs.getString(KEY_WEB_LOCAL, ""));
+        etWebPublic.setText(prefs.getString(KEY_WEB_PUBLIC, ""));
+        etHomeLocal.setText(prefs.getString(KEY_HOME_LOCAL, ""));
+        etHomePublic.setText(prefs.getString(KEY_HOME_PUBLIC, ""));
+        etHomeToken.setText(prefs.getString(KEY_HOME_TOKEN, ""));
+        etFotosLocal.setText(prefs.getString(KEY_FOTOS_LOCAL, ""));
+        etFotosPublic.setText(prefs.getString(KEY_FOTOS_PUBLIC, ""));
+        etFotosApiKey.setText(prefs.getString(KEY_FOTOS_API_KEY, ""));
+
+        etColorHome.setText(prefs.getString(KEY_COLOR_HOME, "#B2D3C2"));
+        etColorFotos.setText(prefs.getString(KEY_COLOR_FOTOS, "#F49AC2"));
+        etColorEcho.setText(prefs.getString(KEY_COLOR_ECHO, "#AEC6CF"));
+        etColorWeb.setText(prefs.getString(KEY_COLOR_WEB, "#FDFD96"));
+        etColorSettings.setText(prefs.getString(KEY_COLOR_SETTINGS, "#EAEAEA"));
+
+        switchTracking.setChecked(prefs.getBoolean(KEY_LOCATION_TRACKING_ENABLED, false));
+
+        // --- NEU: FARB-PICKER FÜR DIE FELDER AKTIVIEREN ---
+        setupColorPicker(etColorHome);
+        setupColorPicker(etColorFotos);
+        setupColorPicker(etColorEcho);
+        setupColorPicker(etColorWeb);
+        setupColorPicker(etColorSettings);
+
+        // --- LOGIK: STANDORT TRACKING BERECHTIGUNGEN ---
+        switchTracking.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (isChecked) {
+                if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                    switchTracking.setChecked(false);
+                    requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_CODE_LOCATION);
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                    switchTracking.setChecked(false);
+                    Toast.makeText(getContext(), "WICHTIG: Bitte wähle gleich 'Immer zulassen' für das Hintergrund-Tracking!", Toast.LENGTH_LONG).show();
+                    requestPermissions(new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}, REQUEST_CODE_LOCATION);
+                }
+            }
+        });
+
+        // --- LOGIK: NFC BUTTON ---
+        btnWriteNfc.setOnClickListener(v -> {
+            String newTagId = UUID.randomUUID().toString();
+            prefs.edit().putString("nfc_write_mode_id", newTagId).apply();
+            Toast.makeText(getContext(), "Bereit! Halte jetzt einen unbeschriebenen NFC Tag an die Rückseite deines Handys.", Toast.LENGTH_LONG).show();
+        });
+
+        // --- LOGIK: BACKUP BUTTON ---
+        if (btnOpenBackup != null) {
+            btnOpenBackup.setOnClickListener(v -> checkPermissionsAndOpenBackupSettings());
+        }
+
+        // --- LOGIK: ALLES SPEICHERN ---
+        btnSaveAll.setOnClickListener(v -> {
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(KEY_WIFI_SSID, etSsid.getText().toString().trim());
+            editor.putString(KEY_ECHO_LOCAL, etEchoLocal.getText().toString().trim());
+            editor.putString(KEY_ECHO_PUBLIC, etEchoPublic.getText().toString().trim());
+            editor.putString(KEY_WEB_LOCAL, etWebLocal.getText().toString().trim());
+            editor.putString(KEY_WEB_PUBLIC, etWebPublic.getText().toString().trim());
+            editor.putString(KEY_HOME_LOCAL, etHomeLocal.getText().toString().trim());
+            editor.putString(KEY_HOME_PUBLIC, etHomePublic.getText().toString().trim());
+            editor.putString(KEY_HOME_TOKEN, etHomeToken.getText().toString().trim());
+            editor.putString(KEY_FOTOS_LOCAL, etFotosLocal.getText().toString().trim());
+            editor.putString(KEY_FOTOS_PUBLIC, etFotosPublic.getText().toString().trim());
+            editor.putString(KEY_FOTOS_API_KEY, etFotosApiKey.getText().toString().trim());
+
+            editor.putString(KEY_COLOR_HOME, etColorHome.getText().toString().trim());
+            editor.putString(KEY_COLOR_FOTOS, etColorFotos.getText().toString().trim());
+            editor.putString(KEY_COLOR_ECHO, etColorEcho.getText().toString().trim());
+            editor.putString(KEY_COLOR_WEB, etColorWeb.getText().toString().trim());
+            editor.putString(KEY_COLOR_SETTINGS, etColorSettings.getText().toString().trim());
+
+            boolean isTracking = switchTracking.isChecked();
+            editor.putBoolean(KEY_LOCATION_TRACKING_ENABLED, isTracking);
+
+            editor.apply();
+
+            // Tracking aktivieren/deaktivieren
+            if (isTracking) {
+                PeriodicWorkRequest locationRequest = new PeriodicWorkRequest.Builder(LocationWorker.class, 15, TimeUnit.MINUTES).build();
+                WorkManager.getInstance(requireContext()).enqueueUniquePeriodicWork(
+                        "HomeAssistantLocation",
+                        ExistingPeriodicWorkPolicy.UPDATE,
+                        locationRequest);
+            } else {
+                WorkManager.getInstance(requireContext()).cancelUniqueWork("HomeAssistantLocation");
+            }
+
+            Toast.makeText(getContext(), "Alle Einstellungen erfolgreich gespeichert! ✅", Toast.LENGTH_SHORT).show();
+
+            // App UI aktualisieren, falls Farben geändert wurden
+            if (getActivity() != null) getActivity().recreate();
+        });
+    }
+
+    // --- NEU: Setup-Methode für den Farb-Picker (Macht die Felder klickbar statt tippbar) ---
+    private void setupColorPicker(EditText editText) {
+        editText.setFocusable(false); // Tastatur blockieren
+        editText.setClickable(true);  // Klickbar machen
+        editText.setCursorVisible(false);
+
+        // Initiale Farbe setzen
+        applyColorToEditText(editText, editText.getText().toString());
+
+        editText.setOnClickListener(v -> showColorPickerDialog(editText));
+    }
+
+    // --- NEU: Dialog mit vorgefertigten schönen Farben anzeigen ---
+    private void showColorPickerDialog(EditText targetEditText) {
+        if (getContext() == null) return;
+
+        // Schöne Pastell- und Material-Farben für dein Design
+        final String[] colorHexes = {
+                "#B2D3C2", "#F49AC2", "#AEC6CF", "#FDFD96", "#EAEAEA",
+                "#FFB347", "#CFCFC4", "#B39EB5", "#77DD77", "#84B6F4",
+                "#FDCAE1", "#FFD1DC", "#C1E1C1", "#FDFD96", "#D3B8E8",
+                "#333333", "#FFFFFF"
+        };
+        final String[] colorNames = {
+                "Uni Grün (Home)", "Uni Pink (Fotos)", "Uni Blau (Echo)", "Uni Gelb (Web)", "Uni Grau (Settings)",
+                "Pastell Orange", "Mittelgrau", "Zartes Lila", "Hellgrün", "Himmelblau",
+                "Rosa", "Kirschblüte", "Minzgrün", "Zitronengelb", "Flieder",
+                "Dunkel (Fast Schwarz)", "Klar Weiß"
+        };
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+        builder.setTitle("Wähle eine Menü-Farbe");
+
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(getContext(), android.R.layout.select_dialog_item, colorNames) {
+            @NonNull
+            @Override
+            public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
+                TextView view = (TextView) super.getView(position, convertView, parent);
+                view.setTextSize(16f);
+                view.setPadding(32, 32, 32, 32);
+
+                int color;
+                try {
+                    color = Color.parseColor(colorHexes[position]);
+                } catch (Exception e) {
+                    color = Color.TRANSPARENT;
+                }
+
+                // Generiere dynamisch einen kleinen runden Farb-Kreis neben dem Text
+                GradientDrawable colorCircle = new GradientDrawable();
+                colorCircle.setShape(GradientDrawable.OVAL);
+                colorCircle.setColor(color);
+                // Leichter Rand für das weiße Icon, damit man es sieht
+                if (colorHexes[position].equals("#FFFFFF")) {
+                    colorCircle.setStroke(2, Color.parseColor("#CCCCCC"));
+                }
+                colorCircle.setSize(60, 60);
+
+                view.setCompoundDrawablesWithIntrinsicBounds(colorCircle, null, null, null);
+                view.setCompoundDrawablePadding(32);
+
+                return view;
+            }
+        };
+
+        builder.setAdapter(adapter, (dialog, which) -> {
+            String selectedHex = colorHexes[which];
+            targetEditText.setText(selectedHex);
+            applyColorToEditText(targetEditText, selectedHex);
+        });
+
+        builder.setNegativeButton("Abbrechen", null);
+        builder.show();
+    }
+
+    // --- NEU: Hilfsmethode, um das Textfeld in der ausgewählten Farbe einzufärben ---
+    private void applyColorToEditText(EditText editText, String hexColor) {
+        try {
+            int color = Color.parseColor(hexColor);
+            editText.setBackgroundTintList(ColorStateList.valueOf(color));
+
+            // Wenn die Farbe sehr dunkel ist, machen wir die Schrift weiß (Kontrast)
+            boolean isDark = ColorUtils.calculateLuminance(color) < 0.5;
+            editText.setTextColor(isDark ? Color.WHITE : Color.parseColor("#333333"));
+        } catch (Exception ignored) {
+            // Falls ein alter, fehlerhafter Wert drinstand, ignorieren wir das
+        }
     }
 
     private void checkPermissionsAndOpenBackupSettings() {
@@ -159,9 +367,9 @@ public class SettingsFragment extends Fragment {
             }
             if (allGranted) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                    Toast.makeText(getContext(), "Schritt 1 fertig! Klicke den Schalter nochmal für die Hintergrund-Erlaubnis.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(getContext(), "Schritt 1 fertig! Aktiviere den Schalter erneut für die Hintergrund-Erlaubnis.", Toast.LENGTH_LONG).show();
                 } else {
-                    Toast.makeText(getContext(), "Alle GPS-Rechte erteilt! Du kannst den Schalter nun dauerhaft aktivieren.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(getContext(), "GPS-Rechte erteilt! Du kannst den Schalter nun aktivieren.", Toast.LENGTH_LONG).show();
                 }
             } else {
                 Toast.makeText(getContext(), "Bitte wähle 'Immer zulassen', sonst klappt das Tracking im Hintergrund nicht.", Toast.LENGTH_LONG).show();
@@ -498,214 +706,5 @@ public class SettingsFragment extends Fragment {
         String name;
         int count;
         String coverImagePath;
-    }
-
-    private void showNetworkSettingsBottomSheet() {
-        if (getContext() == null) return;
-        BottomSheetDialog bottomSheetDialog = new BottomSheetDialog(getContext());
-        View sheetView = LayoutInflater.from(getContext()).inflate(R.layout.bottom_sheet_settings, null);
-        sheetView.setBackgroundTintList(ColorStateList.valueOf(getThemeColor()));
-        bottomSheetDialog.setContentView(sheetView);
-        bottomSheetDialog.setOnShowListener(dialog -> {
-            BottomSheetDialog d = (BottomSheetDialog) dialog;
-            View bottomSheetInternal = d.findViewById(com.google.android.material.R.id.design_bottom_sheet);
-            if (bottomSheetInternal != null) bottomSheetInternal.setBackgroundResource(android.R.color.transparent);
-        });
-
-        EditText etSsid = sheetView.findViewById(R.id.et_home_ssid);
-        EditText etEchoLocal = sheetView.findViewById(R.id.et_echo_local);
-        EditText etEchoPublic = sheetView.findViewById(R.id.et_echo_public);
-        EditText etWebLocal = sheetView.findViewById(R.id.et_web_local);
-        EditText etWebPublic = sheetView.findViewById(R.id.et_web_public);
-        EditText etHomeLocal = sheetView.findViewById(R.id.et_home_local);
-        EditText etHomePublic = sheetView.findViewById(R.id.et_home_public);
-        EditText etFotosLocal = sheetView.findViewById(R.id.et_fotos_local);
-        EditText etFotosPublic = sheetView.findViewById(R.id.et_fotos_public);
-        EditText etFotosApiKey = sheetView.findViewById(R.id.et_fotos_api_key);
-        Button btnSave = sheetView.findViewById(R.id.btn_save_settings);
-
-        ViewGroup parentLayout = (ViewGroup) btnSave.getParent();
-        if (parentLayout instanceof LinearLayout) {
-            int btnIndex = parentLayout.indexOfChild(btnSave);
-
-            EditText etToken = new EditText(getContext());
-            etToken.setHint("🔑 Home Assistant Token (Langlebig)");
-            etToken.setPadding(40, 40, 40, 40);
-            etToken.setBackground(ContextCompat.getDrawable(getContext(), R.drawable.bg_pill_selected));
-            etToken.setBackgroundTintList(ColorStateList.valueOf(Color.WHITE));
-            etToken.setTextColor(Color.parseColor("#333333"));
-            etToken.setHintTextColor(Color.parseColor("#888888"));
-            etToken.setTextSize(16f);
-            etToken.setElevation(2f);
-
-            LinearLayout.LayoutParams originalParams = (LinearLayout.LayoutParams) etSsid.getLayoutParams();
-            LinearLayout.LayoutParams tokenParams = new LinearLayout.LayoutParams(originalParams);
-            tokenParams.setMargins(originalParams.leftMargin, 24, originalParams.rightMargin, 24);
-            etToken.setLayoutParams(tokenParams);
-            parentLayout.addView(etToken, btnIndex);
-
-            SwitchCompat switchTracking = new SwitchCompat(getContext());
-            switchTracking.setText("🌍 Standort im Hintergrund an Home Assistant senden");
-            switchTracking.setTextColor(Color.parseColor("#333333"));
-            switchTracking.setTextSize(14f);
-            switchTracking.setTypeface(null, Typeface.BOLD);
-            switchTracking.setPadding(0, 16, 0, 48);
-
-            LinearLayout.LayoutParams switchParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            switchParams.setMargins(originalParams.leftMargin, 16, originalParams.rightMargin, 48);
-            switchTracking.setLayoutParams(switchParams);
-            parentLayout.addView(switchTracking, btnIndex + 1);
-
-            SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            etToken.setText(prefs.getString(KEY_HOME_TOKEN, ""));
-            switchTracking.setChecked(prefs.getBoolean(KEY_LOCATION_TRACKING_ENABLED, false));
-
-            switchTracking.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                if (isChecked) {
-                    if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                        switchTracking.setChecked(false);
-                        requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_CODE_LOCATION);
-
-                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                        switchTracking.setChecked(false);
-                        Toast.makeText(getContext(), "WICHTIG: Bitte wähle gleich 'Immer zulassen' für das Hintergrund-Tracking!", Toast.LENGTH_LONG).show();
-                        requestPermissions(new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}, REQUEST_CODE_LOCATION);
-                    }
-                }
-            });
-
-            // --- NEU: NFC Schreib Button ---
-            MaterialButton btnWriteNfc = new MaterialButton(getContext());
-            btnWriteNfc.setText("NFC Tag für UniControl beschreiben");
-            btnWriteNfc.setTextColor(Color.WHITE);
-            btnWriteNfc.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#8CA8B3"))); // Dezentes Grau-Blau
-            btnWriteNfc.setCornerRadius(60);
-            LinearLayout.LayoutParams nfcParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            nfcParams.setMargins(originalParams.leftMargin, 0, originalParams.rightMargin, 48);
-            btnWriteNfc.setLayoutParams(nfcParams);
-            btnWriteNfc.setOnClickListener(v -> {
-                String newTagId = UUID.randomUUID().toString();
-                prefs.edit().putString("nfc_write_mode_id", newTagId).apply();
-                Toast.makeText(getContext(), "Bitte halte jetzt einen unbeschriebenen NFC Tag an die Rückseite deines Handys!", Toast.LENGTH_LONG).show();
-                bottomSheetDialog.dismiss();
-            });
-            parentLayout.addView(btnWriteNfc, btnIndex + 2);
-
-            btnSave.setOnClickListener(v -> {
-                SharedPreferences.Editor editor = prefs.edit();
-                editor.putString(KEY_WIFI_SSID, etSsid.getText().toString().trim());
-                editor.putString(KEY_ECHO_LOCAL, etEchoLocal.getText().toString().trim());
-                editor.putString(KEY_ECHO_PUBLIC, etEchoPublic.getText().toString().trim());
-                editor.putString(KEY_WEB_LOCAL, etWebLocal.getText().toString().trim());
-                editor.putString(KEY_WEB_PUBLIC, etWebPublic.getText().toString().trim());
-                editor.putString(KEY_HOME_LOCAL, etHomeLocal.getText().toString().trim());
-                editor.putString(KEY_HOME_PUBLIC, etHomePublic.getText().toString().trim());
-                editor.putString(KEY_FOTOS_LOCAL, etFotosLocal.getText().toString().trim());
-                editor.putString(KEY_FOTOS_PUBLIC, etFotosPublic.getText().toString().trim());
-                editor.putString(KEY_FOTOS_API_KEY, etFotosApiKey.getText().toString().trim());
-
-                editor.putString(KEY_HOME_TOKEN, etToken.getText().toString().trim());
-                boolean isTracking = switchTracking.isChecked();
-                editor.putBoolean(KEY_LOCATION_TRACKING_ENABLED, isTracking);
-                editor.apply();
-
-                if (isTracking) {
-                    PeriodicWorkRequest locationRequest = new PeriodicWorkRequest.Builder(LocationWorker.class, 15, TimeUnit.MINUTES).build();
-                    WorkManager.getInstance(requireContext()).enqueueUniquePeriodicWork(
-                            "HomeAssistantLocation",
-                            ExistingPeriodicWorkPolicy.UPDATE,
-                            locationRequest);
-                    Toast.makeText(getContext(), "Netzwerk gespeichert & Tracking aktiv! 🌍", Toast.LENGTH_SHORT).show();
-                } else {
-                    WorkManager.getInstance(requireContext()).cancelUniqueWork("HomeAssistantLocation");
-                    Toast.makeText(getContext(), "Netzwerk gespeichert!", Toast.LENGTH_SHORT).show();
-                }
-
-                bottomSheetDialog.dismiss();
-            });
-
-        } else {
-            btnSave.setOnClickListener(v -> {
-                SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
-                editor.putString(KEY_WIFI_SSID, etSsid.getText().toString().trim());
-                editor.putString(KEY_ECHO_LOCAL, etEchoLocal.getText().toString().trim());
-                editor.putString(KEY_ECHO_PUBLIC, etEchoPublic.getText().toString().trim());
-                editor.putString(KEY_WEB_LOCAL, etWebLocal.getText().toString().trim());
-                editor.putString(KEY_WEB_PUBLIC, etWebPublic.getText().toString().trim());
-                editor.putString(KEY_HOME_LOCAL, etHomeLocal.getText().toString().trim());
-                editor.putString(KEY_HOME_PUBLIC, etHomePublic.getText().toString().trim());
-                editor.putString(KEY_FOTOS_LOCAL, etFotosLocal.getText().toString().trim());
-                editor.putString(KEY_FOTOS_PUBLIC, etFotosPublic.getText().toString().trim());
-                editor.putString(KEY_FOTOS_API_KEY, etFotosApiKey.getText().toString().trim());
-                editor.apply();
-                Toast.makeText(getContext(), "Netzwerk-Einstellungen gespeichert!", Toast.LENGTH_SHORT).show();
-                bottomSheetDialog.dismiss();
-            });
-        }
-
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        etSsid.setText(prefs.getString(KEY_WIFI_SSID, ""));
-        etEchoLocal.setText(prefs.getString(KEY_ECHO_LOCAL, ""));
-        etEchoPublic.setText(prefs.getString(KEY_ECHO_PUBLIC, ""));
-        etWebLocal.setText(prefs.getString(KEY_WEB_LOCAL, ""));
-        etWebPublic.setText(prefs.getString(KEY_WEB_PUBLIC, ""));
-        etHomeLocal.setText(prefs.getString(KEY_HOME_LOCAL, ""));
-        etHomePublic.setText(prefs.getString(KEY_HOME_PUBLIC, ""));
-        etFotosLocal.setText(prefs.getString(KEY_FOTOS_LOCAL, ""));
-        etFotosPublic.setText(prefs.getString(KEY_FOTOS_PUBLIC, ""));
-        etFotosApiKey.setText(prefs.getString(KEY_FOTOS_API_KEY, ""));
-
-        bottomSheetDialog.show();
-    }
-
-    private void showDesignSettingsBottomSheet() {
-        if (getContext() == null) return;
-        BottomSheetDialog dialog = new BottomSheetDialog(getContext());
-        View sheetView = LayoutInflater.from(getContext()).inflate(R.layout.bottom_sheet_design, null);
-        sheetView.setBackgroundTintList(ColorStateList.valueOf(getThemeColor()));
-        dialog.setContentView(sheetView);
-        dialog.setOnShowListener(d -> {
-            BottomSheetDialog bottomDialog = (BottomSheetDialog) d;
-            View bottomSheetInternal = bottomDialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
-            if (bottomSheetInternal != null) bottomSheetInternal.setBackgroundResource(android.R.color.transparent);
-        });
-
-        EditText etEcho = sheetView.findViewById(R.id.et_color_echo);
-        EditText etWeb = sheetView.findViewById(R.id.et_color_web);
-        EditText etHome = sheetView.findViewById(R.id.et_color_home);
-        EditText etFotos = sheetView.findViewById(R.id.et_color_fotos);
-        EditText etSettings = sheetView.findViewById(R.id.et_color_settings);
-        Button btnSave = sheetView.findViewById(R.id.btn_save_colors);
-
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        etEcho.setText(prefs.getString(KEY_COLOR_ECHO, "#AEC6CF"));
-        etWeb.setText(prefs.getString(KEY_COLOR_WEB, "#FDFD96"));
-        etHome.setText(prefs.getString(KEY_COLOR_HOME, "#B2D3C2"));
-        etFotos.setText(prefs.getString(KEY_COLOR_FOTOS, "#F49AC2"));
-        etSettings.setText(prefs.getString(KEY_COLOR_SETTINGS, "#EAEAEA"));
-
-        btnSave.setOnClickListener(v -> {
-            try {
-                Color.parseColor(etEcho.getText().toString().trim());
-                Color.parseColor(etWeb.getText().toString().trim());
-                Color.parseColor(etHome.getText().toString().trim());
-                Color.parseColor(etFotos.getText().toString().trim());
-                Color.parseColor(etSettings.getText().toString().trim());
-            } catch (IllegalArgumentException e) {
-                Toast.makeText(getContext(), "Bitte überprüfe deine HEX-Codes! (Beispiel: #FF0000)", Toast.LENGTH_LONG).show();
-                return;
-            }
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putString(KEY_COLOR_ECHO, etEcho.getText().toString().trim());
-            editor.putString(KEY_COLOR_WEB, etWeb.getText().toString().trim());
-            editor.putString(KEY_COLOR_HOME, etHome.getText().toString().trim());
-            editor.putString(KEY_COLOR_FOTOS, etFotos.getText().toString().trim());
-            editor.putString(KEY_COLOR_SETTINGS, etSettings.getText().toString().trim());
-            editor.apply();
-            Toast.makeText(getContext(), "Farben gespeichert!", Toast.LENGTH_SHORT).show();
-            dialog.dismiss();
-            if (getActivity() != null) getActivity().recreate();
-        });
-        dialog.show();
     }
 }
