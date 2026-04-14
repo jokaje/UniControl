@@ -256,7 +256,21 @@
                     android:hint="Echo Public URL"
                     android:textColorHint="#888888"
                     android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/et_openclaw_password"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="🔑 OpenClaw Gateway Passwort"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
                     android:layout_marginBottom="24dp"
+                    android:inputType="textPassword"
                     android:textSize="14sp" />
 
                 <TextView
@@ -293,6 +307,79 @@
                     android:textColor="#333333"
                     android:layout_marginBottom="12dp"
                     android:textSize="14sp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- CARD NEU: OpenClaw Identity Experten Modus -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="20dp"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="24dp"
+            app:cardBackgroundColor="#FFFFFF">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🔑 OpenClaw Identity (Experten)"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="8dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Achtung: Dies erlaubt das Übernehmen einer bereits autorisierten Schlüssel-Identität."
+                    android:textSize="12sp"
+                    android:textColor="#888888"
+                    android:layout_marginBottom="16dp"/>
+
+                <EditText
+                    android:id="@+id/et_device_id"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Device ID (UUID)"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="12sp" />
+
+                <EditText
+                    android:id="@+id/et_public_key"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Public Key (Base64)"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="12sp" />
+
+                <EditText
+                    android:id="@+id/et_private_key"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Private Key (Base64)"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="12sp" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

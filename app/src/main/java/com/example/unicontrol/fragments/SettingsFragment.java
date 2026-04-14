@@ -44,6 +44,7 @@ import androidx.work.WorkManager;
 
 import com.bumptech.glide.Glide;
 import com.example.unicontrol.R;
+import com.example.unicontrol.utils.CryptoUtils;
 import com.example.unicontrol.workers.BackupWorker;
 import com.example.unicontrol.workers.LocationWorker;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
@@ -83,6 +84,10 @@ public class SettingsFragment extends Fragment {
     public static final String KEY_BACKUP_ALBUMS = "backup_albums_set";
     public static final String KEY_DEVICE_ID = "device_id_uuid";
 
+    // OpenClaw Keys
+    public static final String KEY_OPENCLAW_PASSWORD = "openclaw_password";
+    public static final String KEY_OPENCLAW_DEVICE_TOKEN = "openclaw_device_token";
+
     // Auto-Backup Keys
     public static final String KEY_AUTO_BACKUP_ENABLED = "auto_backup_enabled";
     public static final String KEY_AUTO_BACKUP_HOUR = "auto_backup_hour";
@@ -94,6 +99,8 @@ public class SettingsFragment extends Fragment {
 
     private static final int REQUEST_CODE_PERMISSIONS = 1002;
     private static final int REQUEST_CODE_LOCATION = 1004;
+
+    private CryptoUtils cryptoUtils;
 
     @Nullable
     @Override
@@ -116,15 +123,14 @@ public class SettingsFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
         view.setBackgroundColor(getThemeColor());
 
+        cryptoUtils = new CryptoUtils(requireContext());
         SharedPreferences prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        if (!prefs.contains(KEY_DEVICE_ID)) {
-            prefs.edit().putString(KEY_DEVICE_ID, UUID.randomUUID().toString()).apply();
-        }
 
-        // --- BINDING DER NEUEN DASHBOARD UI ELEMENTE ---
+        // --- BINDING DER UI ELEMENTE ---
         EditText etSsid = view.findViewById(R.id.et_home_ssid);
         EditText etEchoLocal = view.findViewById(R.id.et_echo_local);
         EditText etEchoPublic = view.findViewById(R.id.et_echo_public);
+        EditText etOpenClawPassword = view.findViewById(R.id.et_openclaw_password);
         EditText etWebLocal = view.findViewById(R.id.et_web_local);
         EditText etWebPublic = view.findViewById(R.id.et_web_public);
         EditText etHomeLocal = view.findViewById(R.id.et_home_local);
@@ -133,6 +139,11 @@ public class SettingsFragment extends Fragment {
         EditText etFotosLocal = view.findViewById(R.id.et_fotos_local);
         EditText etFotosPublic = view.findViewById(R.id.et_fotos_public);
         EditText etFotosApiKey = view.findViewById(R.id.et_fotos_api_key);
+
+        // EXPERTEN FELDER FÜR OPENCLAW IDENTITY
+        EditText etDeviceId = view.findViewById(R.id.et_device_id);
+        EditText etPublicKey = view.findViewById(R.id.et_public_key);
+        EditText etPrivateKey = view.findViewById(R.id.et_private_key);
 
         EditText etColorHome = view.findViewById(R.id.et_color_home);
         EditText etColorFotos = view.findViewById(R.id.et_color_fotos);
@@ -149,6 +160,9 @@ public class SettingsFragment extends Fragment {
         etSsid.setText(prefs.getString(KEY_WIFI_SSID, ""));
         etEchoLocal.setText(prefs.getString(KEY_ECHO_LOCAL, ""));
         etEchoPublic.setText(prefs.getString(KEY_ECHO_PUBLIC, ""));
+        if (etOpenClawPassword != null) {
+            etOpenClawPassword.setText(prefs.getString(KEY_OPENCLAW_PASSWORD, ""));
+        }
         etWebLocal.setText(prefs.getString(KEY_WEB_LOCAL, ""));
         etWebPublic.setText(prefs.getString(KEY_WEB_PUBLIC, ""));
         etHomeLocal.setText(prefs.getString(KEY_HOME_LOCAL, ""));
@@ -158,6 +172,12 @@ public class SettingsFragment extends Fragment {
         etFotosPublic.setText(prefs.getString(KEY_FOTOS_PUBLIC, ""));
         etFotosApiKey.setText(prefs.getString(KEY_FOTOS_API_KEY, ""));
 
+        // EXPERTEN WERTE LADEN (aus CryptoUtils)
+        if (etDeviceId != null) etDeviceId.setText(cryptoUtils.getDeviceId());
+        if (etPublicKey != null) etPublicKey.setText(cryptoUtils.getPublicKeyBase64());
+        if (etPrivateKey != null) etPrivateKey.setText(cryptoUtils.getPrivateKeyBase64());
+
+        // FARBEN LADEN
         etColorHome.setText(prefs.getString(KEY_COLOR_HOME, "#B2D3C2"));
         etColorFotos.setText(prefs.getString(KEY_COLOR_FOTOS, "#F49AC2"));
         etColorEcho.setText(prefs.getString(KEY_COLOR_ECHO, "#AEC6CF"));
@@ -166,14 +186,14 @@ public class SettingsFragment extends Fragment {
 
         switchTracking.setChecked(prefs.getBoolean(KEY_LOCATION_TRACKING_ENABLED, false));
 
-        // --- NEU: FARB-PICKER FÜR DIE FELDER AKTIVIEREN ---
+        // FARB-PICKER INITIALISIEREN
         setupColorPicker(etColorHome);
         setupColorPicker(etColorFotos);
         setupColorPicker(etColorEcho);
         setupColorPicker(etColorWeb);
         setupColorPicker(etColorSettings);
 
-        // --- LOGIK: STANDORT TRACKING BERECHTIGUNGEN ---
+        // TRACKING LOGIK
         switchTracking.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (isChecked) {
                 if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -187,24 +207,29 @@ public class SettingsFragment extends Fragment {
             }
         });
 
-        // --- LOGIK: NFC BUTTON ---
+        // NFC BUTTON LOGIK
         btnWriteNfc.setOnClickListener(v -> {
             String newTagId = UUID.randomUUID().toString();
             prefs.edit().putString("nfc_write_mode_id", newTagId).apply();
             Toast.makeText(getContext(), "Bereit! Halte jetzt einen unbeschriebenen NFC Tag an die Rückseite deines Handys.", Toast.LENGTH_LONG).show();
         });
 
-        // --- LOGIK: BACKUP BUTTON ---
+        // BACKUP BUTTON LOGIK
         if (btnOpenBackup != null) {
             btnOpenBackup.setOnClickListener(v -> checkPermissionsAndOpenBackupSettings());
         }
 
-        // --- LOGIK: ALLES SPEICHERN ---
+        // ALLES SPEICHERN
         btnSaveAll.setOnClickListener(v -> {
             SharedPreferences.Editor editor = prefs.edit();
             editor.putString(KEY_WIFI_SSID, etSsid.getText().toString().trim());
             editor.putString(KEY_ECHO_LOCAL, etEchoLocal.getText().toString().trim());
             editor.putString(KEY_ECHO_PUBLIC, etEchoPublic.getText().toString().trim());
+
+            if (etOpenClawPassword != null) {
+                editor.putString(KEY_OPENCLAW_PASSWORD, etOpenClawPassword.getText().toString().trim());
+            }
+
             editor.putString(KEY_WEB_LOCAL, etWebLocal.getText().toString().trim());
             editor.putString(KEY_WEB_PUBLIC, etWebPublic.getText().toString().trim());
             editor.putString(KEY_HOME_LOCAL, etHomeLocal.getText().toString().trim());
@@ -213,6 +238,17 @@ public class SettingsFragment extends Fragment {
             editor.putString(KEY_FOTOS_LOCAL, etFotosLocal.getText().toString().trim());
             editor.putString(KEY_FOTOS_PUBLIC, etFotosPublic.getText().toString().trim());
             editor.putString(KEY_FOTOS_API_KEY, etFotosApiKey.getText().toString().trim());
+
+            // NEU: Device ID und Crypto Keys werden zentral in CryptoUtils gespeichert!
+            if (etDeviceId != null && etPrivateKey != null && etPublicKey != null) {
+                String newDevId = etDeviceId.getText().toString().trim();
+                String newPriv = etPrivateKey.getText().toString().trim();
+                String newPub = etPublicKey.getText().toString().trim();
+
+                if (!newDevId.isEmpty() && !newPriv.isEmpty() && !newPub.isEmpty()) {
+                    cryptoUtils.setIdentity(newDevId, newPriv, newPub);
+                }
+            }
 
             editor.putString(KEY_COLOR_HOME, etColorHome.getText().toString().trim());
             editor.putString(KEY_COLOR_FOTOS, etColorFotos.getText().toString().trim());
@@ -228,50 +264,28 @@ public class SettingsFragment extends Fragment {
             // Tracking aktivieren/deaktivieren
             if (isTracking) {
                 PeriodicWorkRequest locationRequest = new PeriodicWorkRequest.Builder(LocationWorker.class, 15, TimeUnit.MINUTES).build();
-                WorkManager.getInstance(requireContext()).enqueueUniquePeriodicWork(
-                        "HomeAssistantLocation",
-                        ExistingPeriodicWorkPolicy.UPDATE,
-                        locationRequest);
+                WorkManager.getInstance(requireContext()).enqueueUniquePeriodicWork("HomeAssistantLocation", ExistingPeriodicWorkPolicy.UPDATE, locationRequest);
             } else {
                 WorkManager.getInstance(requireContext()).cancelUniqueWork("HomeAssistantLocation");
             }
 
-            Toast.makeText(getContext(), "Alle Einstellungen erfolgreich gespeichert! ✅", Toast.LENGTH_SHORT).show();
-
-            // App UI aktualisieren, falls Farben geändert wurden
+            Toast.makeText(getContext(), "Einstellungen & Identität gespeichert! ✅", Toast.LENGTH_SHORT).show();
             if (getActivity() != null) getActivity().recreate();
         });
     }
 
-    // --- NEU: Setup-Methode für den Farb-Picker (Macht die Felder klickbar statt tippbar) ---
     private void setupColorPicker(EditText editText) {
-        editText.setFocusable(false); // Tastatur blockieren
-        editText.setClickable(true);  // Klickbar machen
+        editText.setFocusable(false);
+        editText.setClickable(true);
         editText.setCursorVisible(false);
-
-        // Initiale Farbe setzen
         applyColorToEditText(editText, editText.getText().toString());
-
         editText.setOnClickListener(v -> showColorPickerDialog(editText));
     }
 
-    // --- NEU: Dialog mit vorgefertigten schönen Farben anzeigen ---
     private void showColorPickerDialog(EditText targetEditText) {
         if (getContext() == null) return;
-
-        // Schöne Pastell- und Material-Farben für dein Design
-        final String[] colorHexes = {
-                "#B2D3C2", "#F49AC2", "#AEC6CF", "#FDFD96", "#EAEAEA",
-                "#FFB347", "#CFCFC4", "#B39EB5", "#77DD77", "#84B6F4",
-                "#FDCAE1", "#FFD1DC", "#C1E1C1", "#FDFD96", "#D3B8E8",
-                "#333333", "#FFFFFF"
-        };
-        final String[] colorNames = {
-                "Uni Grün (Home)", "Uni Pink (Fotos)", "Uni Blau (Echo)", "Uni Gelb (Web)", "Uni Grau (Settings)",
-                "Pastell Orange", "Mittelgrau", "Zartes Lila", "Hellgrün", "Himmelblau",
-                "Rosa", "Kirschblüte", "Minzgrün", "Zitronengelb", "Flieder",
-                "Dunkel (Fast Schwarz)", "Klar Weiß"
-        };
+        final String[] colorHexes = {"#B2D3C2", "#F49AC2", "#AEC6CF", "#FDFD96", "#EAEAEA", "#FFB347", "#CFCFC4", "#B39EB5", "#77DD77", "#84B6F4", "#FDCAE1", "#FFD1DC", "#C1E1C1", "#FDFD96", "#D3B8E8", "#333333", "#FFFFFF"};
+        final String[] colorNames = {"Uni Grün (Home)", "Uni Pink (Fotos)", "Uni Blau (Echo)", "Uni Gelb (Web)", "Uni Grau (Settings)", "Pastell Orange", "Mittelgrau", "Zartes Lila", "Hellgrün", "Himmelblau", "Rosa", "Kirschblüte", "Minzgrün", "Zitronengelb", "Flieder", "Dunkel (Fast Schwarz)", "Klar Weiß"};
 
         AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
         builder.setTitle("Wähle eine Menü-Farbe");
@@ -283,27 +297,15 @@ public class SettingsFragment extends Fragment {
                 TextView view = (TextView) super.getView(position, convertView, parent);
                 view.setTextSize(16f);
                 view.setPadding(32, 32, 32, 32);
-
                 int color;
-                try {
-                    color = Color.parseColor(colorHexes[position]);
-                } catch (Exception e) {
-                    color = Color.TRANSPARENT;
-                }
-
-                // Generiere dynamisch einen kleinen runden Farb-Kreis neben dem Text
+                try { color = Color.parseColor(colorHexes[position]); } catch (Exception e) { color = Color.TRANSPARENT; }
                 GradientDrawable colorCircle = new GradientDrawable();
                 colorCircle.setShape(GradientDrawable.OVAL);
                 colorCircle.setColor(color);
-                // Leichter Rand für das weiße Icon, damit man es sieht
-                if (colorHexes[position].equals("#FFFFFF")) {
-                    colorCircle.setStroke(2, Color.parseColor("#CCCCCC"));
-                }
+                if (colorHexes[position].equals("#FFFFFF")) colorCircle.setStroke(2, Color.parseColor("#CCCCCC"));
                 colorCircle.setSize(60, 60);
-
                 view.setCompoundDrawablesWithIntrinsicBounds(colorCircle, null, null, null);
                 view.setCompoundDrawablePadding(32);
-
                 return view;
             }
         };
@@ -318,23 +320,17 @@ public class SettingsFragment extends Fragment {
         builder.show();
     }
 
-    // --- NEU: Hilfsmethode, um das Textfeld in der ausgewählten Farbe einzufärben ---
     private void applyColorToEditText(EditText editText, String hexColor) {
         try {
             int color = Color.parseColor(hexColor);
             editText.setBackgroundTintList(ColorStateList.valueOf(color));
-
-            // Wenn die Farbe sehr dunkel ist, machen wir die Schrift weiß (Kontrast)
             boolean isDark = ColorUtils.calculateLuminance(color) < 0.5;
             editText.setTextColor(isDark ? Color.WHITE : Color.parseColor("#333333"));
-        } catch (Exception ignored) {
-            // Falls ein alter, fehlerhafter Wert drinstand, ignorieren wir das
-        }
+        } catch (Exception ignored) {}
     }
 
     private void checkPermissionsAndOpenBackupSettings() {
         if (getContext() == null || getActivity() == null) return;
-
         List<String> requiredPermissions = new ArrayList<>();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) requiredPermissions.add(Manifest.permission.READ_MEDIA_IMAGES);
@@ -342,12 +338,8 @@ public class SettingsFragment extends Fragment {
         } else {
             if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) requiredPermissions.add(Manifest.permission.READ_EXTERNAL_STORAGE);
         }
-
-        if (!requiredPermissions.isEmpty()) {
-            requestPermissions(requiredPermissions.toArray(new String[0]), REQUEST_CODE_PERMISSIONS);
-        } else {
-            showBackupSettingsBottomSheet();
-        }
+        if (!requiredPermissions.isEmpty()) requestPermissions(requiredPermissions.toArray(new String[0]), REQUEST_CODE_PERMISSIONS);
+        else showBackupSettingsBottomSheet();
     }
 
     @Override
@@ -355,16 +347,12 @@ public class SettingsFragment extends Fragment {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             boolean allGranted = true;
-            for (int result : grantResults) {
-                if (result != PackageManager.PERMISSION_GRANTED) { allGranted = false; break; }
-            }
+            for (int result : grantResults) if (result != PackageManager.PERMISSION_GRANTED) { allGranted = false; break; }
             if (allGranted) showBackupSettingsBottomSheet();
             else Toast.makeText(getContext(), "Berechtigung benötigt, um lokale Alben zu finden!", Toast.LENGTH_LONG).show();
         } else if (requestCode == REQUEST_CODE_LOCATION) {
             boolean allGranted = true;
-            for (int result : grantResults) {
-                if (result != PackageManager.PERMISSION_GRANTED) { allGranted = false; break; }
-            }
+            for (int result : grantResults) if (result != PackageManager.PERMISSION_GRANTED) { allGranted = false; break; }
             if (allGranted) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                     Toast.makeText(getContext(), "Schritt 1 fertig! Aktiviere den Schalter erneut für die Hintergrund-Erlaubnis.", Toast.LENGTH_LONG).show();
@@ -379,28 +367,21 @@ public class SettingsFragment extends Fragment {
 
     private void showBackupSettingsBottomSheet() {
         if (getContext() == null) return;
-
         BottomSheetDialog dialog = new BottomSheetDialog(getContext());
         View sheetView = LayoutInflater.from(getContext()).inflate(R.layout.bottom_sheet_list, null);
         sheetView.setBackgroundTintList(ColorStateList.valueOf(getThemeColor()));
         dialog.setContentView(sheetView);
-
         View bottomSheetInternal = dialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
         if (bottomSheetInternal != null) bottomSheetInternal.setBackgroundResource(android.R.color.transparent);
-
         TextView tvTitle = sheetView.findViewById(R.id.tv_bs_title);
         LinearLayout container = sheetView.findViewById(R.id.layout_bs_container);
-
         tvTitle.setText("Back-Up Alben wählen");
-
         TextView loading = new TextView(getContext());
         loading.setText("Durchsuche dein Smartphone...");
         loading.setGravity(Gravity.CENTER);
         loading.setPadding(0, 50, 0, 50);
         container.addView(loading);
-
         dialog.show();
-
         Executors.newSingleThreadExecutor().execute(() -> {
             List<LocalAlbum> albums = scanLocalMediaFolders();
             if (getActivity() != null) {
@@ -422,25 +403,20 @@ public class SettingsFragment extends Fragment {
     private List<LocalAlbum> scanLocalMediaFolders() {
         List<LocalAlbum> resultList = new ArrayList<>();
         if (getContext() == null) return resultList;
-
         HashMap<String, LocalAlbum> albumMap = new HashMap<>();
         Uri[] uris = { MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI };
         String[] projection = { MediaStore.MediaColumns.BUCKET_ID, MediaStore.MediaColumns.BUCKET_DISPLAY_NAME, MediaStore.MediaColumns.DATA };
-
         for (Uri uri : uris) {
             try (Cursor cursor = getContext().getContentResolver().query(uri, projection, null, null, "DATE_ADDED DESC")) {
                 if (cursor != null) {
                     int bucketIdColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_ID);
                     int bucketNameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME);
                     int dataColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA);
-
                     while (cursor.moveToNext()) {
                         String bucketId = cursor.getString(bucketIdColumn);
                         String bucketName = cursor.getString(bucketNameColumn);
                         String imagePath = cursor.getString(dataColumn);
-
                         if (bucketName == null) bucketName = "Unbekannt";
-
                         if (albumMap.containsKey(bucketId)) {
                             albumMap.get(bucketId).count++;
                         } else {
@@ -466,48 +442,36 @@ public class SettingsFragment extends Fragment {
 
     private void scheduleAutoBackup(SharedPreferences prefs) {
         if (getContext() == null) return;
-
         if (!prefs.getBoolean(KEY_AUTO_BACKUP_ENABLED, false)) {
             WorkManager.getInstance(requireContext()).cancelUniqueWork("ImmichAutoBackup");
             return;
         }
-
         int hour = prefs.getInt(KEY_AUTO_BACKUP_HOUR, 2);
         int minute = prefs.getInt(KEY_AUTO_BACKUP_MINUTE, 0);
-
         Calendar currentDate = Calendar.getInstance();
         Calendar dueDate = Calendar.getInstance();
         dueDate.set(Calendar.HOUR_OF_DAY, hour);
         dueDate.set(Calendar.MINUTE, minute);
         dueDate.set(Calendar.SECOND, 0);
-
         if (dueDate.before(currentDate)) {
             dueDate.add(Calendar.HOUR_OF_DAY, 24);
         }
-
         long timeDiff = dueDate.getTimeInMillis() - currentDate.getTimeInMillis();
-
         Constraints constraints = new Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.UNMETERED)
                 .setRequiresBatteryNotLow(true)
                 .build();
-
         OneTimeWorkRequest backupRequest = new OneTimeWorkRequest.Builder(BackupWorker.class)
                 .setInitialDelay(timeDiff, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .setConstraints(constraints)
                 .build();
-
-        WorkManager.getInstance(requireContext()).enqueueUniqueWork(
-                "ImmichAutoBackup",
-                ExistingWorkPolicy.REPLACE,
-                backupRequest);
+        WorkManager.getInstance(requireContext()).enqueueUniqueWork("ImmichAutoBackup", ExistingWorkPolicy.REPLACE, backupRequest);
     }
 
     private void populateBackupList(LinearLayout container, List<LocalAlbum> albums, BottomSheetDialog dialog) {
         if (getContext() == null) return;
         SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         Set<String> selectedBuckets = prefs.getStringSet(KEY_BACKUP_ALBUMS, new HashSet<>());
-
         boolean isAutoBackup = prefs.getBoolean(KEY_AUTO_BACKUP_ENABLED, false);
         int savedHour = prefs.getInt(KEY_AUTO_BACKUP_HOUR, 2);
         int savedMinute = prefs.getInt(KEY_AUTO_BACKUP_MINUTE, 0);
@@ -561,13 +525,10 @@ public class SettingsFragment extends Fragment {
         tvTimeValue.setOnClickListener(v -> {
             int currentHour = prefs.getInt(KEY_AUTO_BACKUP_HOUR, 2);
             int currentMinute = prefs.getInt(KEY_AUTO_BACKUP_MINUTE, 0);
-
             new TimePickerDialog(getContext(), (view, hourOfDay, minute) -> {
                 prefs.edit().putInt(KEY_AUTO_BACKUP_HOUR, hourOfDay).putInt(KEY_AUTO_BACKUP_MINUTE, minute).apply();
                 tvTimeValue.setText(String.format(Locale.getDefault(), "%02d:%02d Uhr", hourOfDay, minute));
-
                 scheduleAutoBackup(prefs);
-
                 Toast.makeText(getContext(), "Backup-Zeit auf " + String.format(Locale.getDefault(), "%02d:%02d", hourOfDay, minute) + " geändert.", Toast.LENGTH_SHORT).show();
             }, currentHour, currentMinute, true).show();
         });
@@ -579,7 +540,6 @@ public class SettingsFragment extends Fragment {
         autoToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
             prefs.edit().putBoolean(KEY_AUTO_BACKUP_ENABLED, isChecked).apply();
             timeRow.setVisibility(isChecked ? View.VISIBLE : View.GONE);
-
             if (isChecked) {
                 scheduleAutoBackup(prefs);
                 Toast.makeText(getContext(), "Hintergrund-Backup aktiviert! 🚀", Toast.LENGTH_SHORT).show();
@@ -590,7 +550,6 @@ public class SettingsFragment extends Fragment {
         });
 
         View separator = new View(getContext());
-        separator.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 2));
         separator.setBackgroundColor(Color.parseColor("#DDDDDD"));
         LinearLayout.LayoutParams sepParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 2);
         sepParams.setMargins(0, 0, 0, 32);
@@ -681,21 +640,9 @@ public class SettingsFragment extends Fragment {
                 Toast.makeText(getContext(), "Bitte wähle zuerst mindestens einen Ordner aus!", Toast.LENGTH_SHORT).show();
                 return;
             }
-
-            Data inputData = new Data.Builder()
-                    .putBoolean("is_manual", true)
-                    .build();
-
-            OneTimeWorkRequest manualBackupRequest = new OneTimeWorkRequest.Builder(BackupWorker.class)
-                    .setInputData(inputData)
-                    .build();
-
-            WorkManager.getInstance(requireContext()).enqueueUniqueWork(
-                    "ImmichManualBackup",
-                    ExistingWorkPolicy.REPLACE,
-                    manualBackupRequest
-            );
-
+            Data inputData = new Data.Builder().putBoolean("is_manual", true).build();
+            OneTimeWorkRequest manualBackupRequest = new OneTimeWorkRequest.Builder(BackupWorker.class).setInputData(inputData).build();
+            WorkManager.getInstance(requireContext()).enqueueUniqueWork("ImmichManualBackup", ExistingWorkPolicy.REPLACE, manualBackupRequest);
             Toast.makeText(getContext(), "Backup gestartet! Siehe Benachrichtigungsleiste.", Toast.LENGTH_LONG).show();
             dialog.dismiss();
         });
