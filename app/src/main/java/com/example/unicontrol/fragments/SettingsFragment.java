@@ -270,7 +270,12 @@ public class SettingsFragment extends Fragment {
             }
 
             Toast.makeText(getContext(), "Einstellungen & Identität gespeichert! ✅", Toast.LENGTH_SHORT).show();
-            if (getActivity() != null) getActivity().recreate();
+
+            // KORREKTUR: Den harten Neustart (recreate) entfernen!
+            // Stattdessen einfach die Hintergrundfarbe des aktuellen Fensters live anpassen.
+            if (getView() != null) {
+                getView().setBackgroundColor(getThemeColor());
+            }
         });
     }
 
