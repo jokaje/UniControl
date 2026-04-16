@@ -49,11 +49,21 @@ public class OpenClawClient extends WebSocketListener {
     // --- HIER PASSIERT DIE MAGIE FÜR DIE ANHÄNGE ---
     public void sendChatMessage(String text, String base64Content, String mimeType) {
         if (webSocket != null) {
+
+            // Size Guard - Schutz vor zu großen Base64 Strings (Videos/Audio)
+            if (base64Content != null && base64Content.length() > 10_000_000) {
+                Log.e(TAG, "Abbruch: Base64 String ist zu lang (" + base64Content.length() + " Zeichen)");
+                if (chatListener != null) {
+                    chatListener.onConnectionStatusChanged("❌ Anhang zu groß (max ~7.5MB). Bitte eine kleinere Datei wählen oder komprimieren.");
+                }
+                return;
+            }
+
             JsonObject params = new JsonObject();
 
             // Pflichtfelder für chat.send
             params.addProperty("sessionKey", "agent:main:main");
-            params.addProperty("idempotencyKey", UUID.randomUUID().toString()); // ZURÜCK: Wichtig für chat.send!
+            params.addProperty("idempotencyKey", UUID.randomUUID().toString());
             params.addProperty("message", (text != null) ? text : "");
 
             // Attachments Array exakt nach Vorgabe einbauen
@@ -64,9 +74,12 @@ public class OpenClawClient extends WebSocketListener {
                 attachment.addProperty("mimeType", mimeType);
                 attachment.addProperty("content", base64Content);
 
+                // NEU: Das von ihm erwähnte, optionale fileName-Feld hinzufügen!
+                String ext = mimeType.contains("/") ? mimeType.split("/")[1] : "bin";
+                attachment.addProperty("fileName", "upload_" + System.currentTimeMillis() + "." + ext);
+
                 attachments.add(attachment);
 
-                // Das Array zwingend unter "attachments" an params anhängen
                 params.add("attachments", attachments);
                 Log.d(TAG, "Chat-Nachricht mit Anhang geschnürt! MimeType: " + mimeType);
             } else {
@@ -76,18 +89,19 @@ public class OpenClawClient extends WebSocketListener {
             JsonObject request = new JsonObject();
             request.addProperty("type", "req");
             request.addProperty("id", UUID.randomUUID().toString());
-
-            // ROLLE RÜCKWÄRTS: Es ist und bleibt 'chat.send'!
             request.addProperty("method", "chat.send");
             request.add("params", params);
 
-            // Umwandeln in Text
             String jsonPayload = gson.toJson(request);
-
-            // Kleine Vorschau im Log
             Log.d(TAG, "Sende an WebSocket: " + jsonPayload.substring(0, Math.min(250, jsonPayload.length())) + "...");
 
-            webSocket.send(jsonPayload);
+            boolean success = webSocket.send(jsonPayload);
+            if (!success) {
+                Log.e(TAG, "WebSocket.send() gab 'false' zurück. Nachricht wurde nicht versendet!");
+                if (chatListener != null) {
+                    chatListener.onConnectionStatusChanged("❌ Senden fehlgeschlagen. Datei zu groß für WebSocket oder Verbindung getrennt.");
+                }
+            }
         } else {
             if (chatListener != null) chatListener.onConnectionStatusChanged("Fehler: Nicht verbunden.");
         }
