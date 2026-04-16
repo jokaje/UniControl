@@ -35,6 +35,7 @@ public class OpenClawClient extends WebSocketListener {
     public interface ChatListener {
         void onMessageReceived(String text);
         void onConnectionStatusChanged(String status);
+        void onAgentTyping();
     }
 
     public void setChatListener(ChatListener listener) {
@@ -42,23 +43,51 @@ public class OpenClawClient extends WebSocketListener {
     }
 
     public void sendChatMessage(String text) {
+        sendChatMessage(text, null, null);
+    }
+
+    // --- HIER PASSIERT DIE MAGIE FÜR DIE ANHÄNGE ---
+    public void sendChatMessage(String text, String base64Content, String mimeType) {
         if (webSocket != null) {
             JsonObject params = new JsonObject();
 
-            // 1. Die zwingend geforderten Parameter hinzufügen
-            params.addProperty("sessionKey", "agent:main:main"); // Geteilte Session mit WhatsApp und Co.
-            params.addProperty("idempotencyKey", UUID.randomUUID().toString()); // Verhindert doppelte Nachrichten
+            // Pflichtfelder für chat.send
+            params.addProperty("sessionKey", "agent:main:main");
+            params.addProperty("idempotencyKey", UUID.randomUUID().toString()); // ZURÜCK: Wichtig für chat.send!
+            params.addProperty("message", (text != null) ? text : "");
 
-            // 2. Die Nachricht einfach direkt als String übergeben!
-            params.addProperty("message", text);
+            // Attachments Array exakt nach Vorgabe einbauen
+            if (base64Content != null && mimeType != null && !base64Content.isEmpty()) {
+                JsonArray attachments = new JsonArray();
+
+                JsonObject attachment = new JsonObject();
+                attachment.addProperty("mimeType", mimeType);
+                attachment.addProperty("content", base64Content);
+
+                attachments.add(attachment);
+
+                // Das Array zwingend unter "attachments" an params anhängen
+                params.add("attachments", attachments);
+                Log.d(TAG, "Chat-Nachricht mit Anhang geschnürt! MimeType: " + mimeType);
+            } else {
+                Log.d(TAG, "Chat-Nachricht OHNE Anhang geschnürt.");
+            }
 
             JsonObject request = new JsonObject();
             request.addProperty("type", "req");
             request.addProperty("id", UUID.randomUUID().toString());
+
+            // ROLLE RÜCKWÄRTS: Es ist und bleibt 'chat.send'!
             request.addProperty("method", "chat.send");
             request.add("params", params);
 
-            webSocket.send(gson.toJson(request));
+            // Umwandeln in Text
+            String jsonPayload = gson.toJson(request);
+
+            // Kleine Vorschau im Log
+            Log.d(TAG, "Sende an WebSocket: " + jsonPayload.substring(0, Math.min(250, jsonPayload.length())) + "...");
+
+            webSocket.send(jsonPayload);
         } else {
             if (chatListener != null) chatListener.onConnectionStatusChanged("Fehler: Nicht verbunden.");
         }
@@ -142,35 +171,27 @@ public class OpenClawClient extends WebSocketListener {
 
     @Override
     public void onMessage(@NonNull WebSocket webSocket, @NonNull String text) {
-        Log.d(TAG, "Empfangen: " + text);
-
         try {
             JsonObject json = gson.fromJson(text, JsonObject.class);
             String type = json.has("type") ? json.get("type").getAsString() : "";
 
-            // 1. Challenge abfangen
             if ("event".equals(type) && json.has("event") && "connect.challenge".equals(json.get("event").getAsString())) {
                 JsonObject payload = json.getAsJsonObject("payload");
-                String nonce = payload.get("nonce").getAsString();
-                handleConnectChallenge(nonce);
+                handleConnectChallenge(payload.get("nonce").getAsString());
             }
-            // 2. Antworten auf unsere Anfragen (Req/Res)
             else if ("res".equals(type)) {
                 boolean ok = json.has("ok") && json.get("ok").getAsBoolean();
                 if (ok) {
                     JsonObject payload = json.has("payload") ? json.getAsJsonObject("payload") : new JsonObject();
 
-                    // Unterscheiden: Ist das ein Auth-Erfolg oder ein Chat-Send-Erfolg?
                     if (payload.has("server") || payload.has("deviceToken")) {
-                        // Das ist die Antwort auf unseren "connect" Request!
                         if (chatListener != null) chatListener.onConnectionStatusChanged("Authentifizierung erfolgreich! ✅");
                         if (payload.has("deviceToken")) {
-                            String newDeviceToken = payload.get("deviceToken").getAsString();
-                            settingsPrefs.edit().putString(SettingsFragment.KEY_OPENCLAW_DEVICE_TOKEN, newDeviceToken).apply();
+                            settingsPrefs.edit().putString(SettingsFragment.KEY_OPENCLAW_DEVICE_TOKEN, payload.get("deviceToken").getAsString()).apply();
                         }
-                    } else if (payload.has("runId")) {
-                        // Das ist nur die Bestätigung, dass er unsere Nachricht verarbeitet
-                        Log.d(TAG, "Nachricht vom Server bestätigt. Agent überlegt...");
+                    }
+                    else if (payload.has("runId") && payload.has("status") && "started".equals(payload.get("status").getAsString())) {
+                        if (chatListener != null) chatListener.onAgentTyping();
                     }
                 } else {
                     JsonObject error = json.has("error") ? json.getAsJsonObject("error") : new JsonObject();
@@ -179,32 +200,22 @@ public class OpenClawClient extends WebSocketListener {
                     String reason = details.has("reason") ? details.get("reason").getAsString() : "";
 
                     if ("device-id-mismatch".equals(reason)) {
-                        Log.w(TAG, "Device-ID Mismatch erkannt! Lösche korrupten Token...");
                         settingsPrefs.edit().remove(SettingsFragment.KEY_OPENCLAW_DEVICE_TOKEN).apply();
-                        if (chatListener != null) {
-                            chatListener.onConnectionStatusChanged("❌ Mismatch Fehler!\nDer Token wurde zurückgesetzt.\nBitte überprüfe deine ID und Keys in den Einstellungen und versuche es erneut.");
-                        }
-                    }
-                    else if ("pairing-required".equals(reason) || "device-not-approved".equals(reason) || errorMsg.contains("pair") || errorMsg.contains("approve")) {
+                        if (chatListener != null) chatListener.onConnectionStatusChanged("❌ Mismatch Fehler!\nDer Token wurde zurückgesetzt.");
+                    } else if ("pairing-required".equals(reason) || "device-not-approved".equals(reason) || errorMsg.contains("pair") || errorMsg.contains("approve")) {
                         String deviceId = settingsPrefs.getString(SettingsFragment.KEY_DEVICE_ID, cryptoUtils.getDeviceId());
-                        if (chatListener != null) {
-                            chatListener.onConnectionStatusChanged("⏳ Gerät muss gekoppelt werden!\n\nFühre auf deinem Server aus:\nopenclaw devices approve " + deviceId);
-                        }
+                        if (chatListener != null) chatListener.onConnectionStatusChanged("⏳ Gerät muss gekoppelt werden!\n\nFühre auf deinem Server aus:\nopenclaw devices approve " + deviceId);
                     } else {
                         if (chatListener != null) chatListener.onConnectionStatusChanged("❌ Server-Meldung: " + errorMsg);
                     }
                 }
             }
-            // 3. Echte Chat-Nachrichten empfangen
             else if ("event".equals(type) && json.has("event") && "chat".equals(json.get("event").getAsString())) {
                 JsonObject payload = json.getAsJsonObject("payload");
 
-                // Wir warten auf "state": "final", damit wir die vollständige Nachricht haben
                 if (payload.has("state") && "final".equals(payload.get("state").getAsString())) {
                     if (payload.has("message")) {
                         JsonObject message = payload.getAsJsonObject("message");
-
-                        // Der Agent antwortet in einem Array "content": [{"type":"text", "text":"Hallo!"}]
                         if (message.has("content") && message.get("content").isJsonArray()) {
                             JsonArray contentArray = message.getAsJsonArray("content");
                             if (contentArray.size() > 0) {
@@ -230,7 +241,6 @@ public class OpenClawClient extends WebSocketListener {
 
     private void handleConnectChallenge(String nonce) {
         String deviceId = cryptoUtils.getDeviceId();
-
         String password = settingsPrefs.getString(SettingsFragment.KEY_OPENCLAW_PASSWORD, "");
         String deviceToken = settingsPrefs.getString(SettingsFragment.KEY_OPENCLAW_DEVICE_TOKEN, "");
         if (deviceToken == null) deviceToken = "";
@@ -249,7 +259,6 @@ public class OpenClawClient extends WebSocketListener {
 
         String rawSignature = cryptoUtils.signMessage(payloadToSign);
         String signature = toBase64Url(rawSignature);
-
         String rawPublicKey = cryptoUtils.getPublicKeyBase64();
         String publicKey = toBase64Url(rawPublicKey);
 
@@ -261,9 +270,7 @@ public class OpenClawClient extends WebSocketListener {
 
         JsonObject authObject = new JsonObject();
         authObject.addProperty("password", password);
-        if (!deviceToken.isEmpty()) {
-            authObject.addProperty("deviceToken", deviceToken);
-        }
+        if (!deviceToken.isEmpty()) authObject.addProperty("deviceToken", deviceToken);
 
         JsonObject deviceObject = new JsonObject();
         deviceObject.addProperty("id", deviceId);

@@ -1,20 +1,32 @@
 package com.example.unicontrol.fragments;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.ContentResolver;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.ImageView;
+import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
@@ -28,6 +40,10 @@ import com.example.unicontrol.network.OpenClawClient;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,8 +57,12 @@ public class EchoFragment extends Fragment {
     private RecyclerView chatRecyclerView;
     private EditText messageEditText;
     private ImageButton sendButton;
+    private ImageButton attachButton;
 
-    // NEU: UI Elemente für den Status
+    private View attachmentPreviewLayout;
+    private ImageView attachmentPreviewImage;
+    private ImageButton removeAttachmentButton;
+
     private View statusIndicator;
     private TextView statusText;
 
@@ -50,6 +70,24 @@ public class EchoFragment extends Fragment {
     private OpenClawClient openClawClient;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
     private Gson gson = new Gson();
+
+    private int currentThemeColor;
+
+    private String pendingBase64 = null;
+    private String pendingMimeType = null;
+    private String pendingUriString = null;
+
+    // NEU: Variable, um die "KI schreibt..." Nachricht zu verfolgen
+    private ChatMessage typingMessage = null;
+
+    private final ActivityResultLauncher<String> filePickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.GetContent(),
+            uri -> {
+                if (uri != null) {
+                    processSelectedFile(uri);
+                }
+            }
+    );
 
     @Nullable
     @Override
@@ -59,9 +97,13 @@ public class EchoFragment extends Fragment {
         chatRecyclerView = view.findViewById(R.id.chatRecyclerView);
         messageEditText = view.findViewById(R.id.messageEditText);
         sendButton = view.findViewById(R.id.sendButton);
-
+        attachButton = view.findViewById(R.id.attachButton);
         statusIndicator = view.findViewById(R.id.statusIndicator);
         statusText = view.findViewById(R.id.statusText);
+
+        attachmentPreviewLayout = view.findViewById(R.id.attachmentPreviewLayout);
+        attachmentPreviewImage = view.findViewById(R.id.attachmentPreviewImage);
+        removeAttachmentButton = view.findViewById(R.id.removeAttachmentButton);
 
         chatAdapter = new ChatAdapter();
         LinearLayoutManager layoutManager = new LinearLayoutManager(getContext());
@@ -69,81 +111,211 @@ public class EchoFragment extends Fragment {
         chatRecyclerView.setLayoutManager(layoutManager);
         chatRecyclerView.setAdapter(chatAdapter);
 
-        // --- FARBE AUS DEN EINSTELLUNGEN LADEN ---
         SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
         String echoColorHex = prefs.getString(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF");
-        int themeColor;
         try {
-            themeColor = Color.parseColor(echoColorHex);
+            currentThemeColor = Color.parseColor(echoColorHex);
         } catch (Exception e) {
-            themeColor = Color.parseColor("#AEC6CF");
+            currentThemeColor = Color.parseColor("#AEC6CF");
         }
 
-        // --- THEME-FARBE ANWENDEN ---
-        chatAdapter.setThemeColor(themeColor);
-
-        // Eingabefeld: Textfarbe = Theme-Farbe, Hint = Grau (damit es nie weiß-auf-weiß ist!)
-        messageEditText.setTextColor(themeColor);
+        chatAdapter.setThemeColor(currentThemeColor);
+        messageEditText.setTextColor(Color.parseColor("#333333"));
         messageEditText.setHintTextColor(Color.parseColor("#888888"));
+        sendButton.setColorFilter(currentThemeColor);
 
-        // Den Senden-Button ebenfalls in der Theme-Farbe einfärben!
-        sendButton.setColorFilter(themeColor);
-        // ------------------------------------------
+        chatAdapter.setMessageClickListener((message, anchorView) -> {
+            showMessageMenu(message, anchorView);
+        });
 
-        // Initiale Farbe setzen (Getrennt / Rot)
         updateStatusUI(Color.parseColor("#FF6961"), "Getrennt");
-
-        // Lade alte Chat-Nachrichten
         loadChatHistory();
 
         openClawClient = new OpenClawClient(requireContext());
-
         openClawClient.setChatListener(new OpenClawClient.ChatListener() {
+
+            // NEU: KI fängt an zu denken
+            @Override
+            public void onAgentTyping() {
+                mainHandler.post(() -> {
+                    if (typingMessage == null) {
+                        typingMessage = new ChatMessage("KI schreibt...", false);
+                        typingMessage.setTypingIndicator(true); // Macht es grau und kursiv
+                        addMessageToUI(typingMessage);
+                    }
+                });
+            }
+
             @Override
             public void onMessageReceived(String text) {
-                // Echte Agent-Nachricht (wird im Chat angezeigt)
-                mainHandler.post(() -> addMessageToUI(new ChatMessage(text, false, false)));
+                mainHandler.post(() -> {
+                    // Lösche die "KI schreibt..." Blase, bevor die echte Nachricht kommt
+                    if (typingMessage != null) {
+                        chatAdapter.removeMessage(typingMessage);
+                        typingMessage = null;
+                    }
+                    addMessageToUI(new ChatMessage(text, false, false, null, null));
+                });
             }
 
             @Override
             public void onConnectionStatusChanged(String status) {
                 mainHandler.post(() -> {
-                    // Logik für den Status-Punkt
-                    int color = Color.parseColor("#FFB347"); // Standard: Orange (Verbindet...)
+                    int color = Color.parseColor("#FFB347");
                     String shortStatus = "Verbinde...";
 
                     if (status.contains("erfolgreich") || status.contains("✅")) {
-                        color = Color.parseColor("#77DD77"); // Grün
-                        shortStatus = "Verbunden";
+                        color = Color.parseColor("#77DD77"); shortStatus = "Verbunden";
                     } else if (status.contains("Fehler") || status.contains("❌") || status.contains("Abbruch") || status.contains("fehlgeschlagen")) {
-                        color = Color.parseColor("#FF6961"); // Rot
-                        shortStatus = "Fehler";
-                        if (getContext() != null) {
-                            Toast.makeText(getContext(), status, Toast.LENGTH_LONG).show();
+                        color = Color.parseColor("#FF6961"); shortStatus = "Fehler";
+                        // Fehler = Tippen abbrechen
+                        if (typingMessage != null) {
+                            chatAdapter.removeMessage(typingMessage);
+                            typingMessage = null;
                         }
                     } else if (status.contains("gekoppelt werden") || status.contains("⏳")) {
-                        color = Color.parseColor("#FFB347"); // Orange
-                        shortStatus = "Pairing nötig";
-                        if (getContext() != null) {
-                            Toast.makeText(getContext(), status, Toast.LENGTH_LONG).show();
-                        }
+                        color = Color.parseColor("#FFB347"); shortStatus = "Pairing nötig";
                     }
-
                     updateStatusUI(color, shortStatus);
                 });
             }
         });
 
+        if (attachButton != null) attachButton.setOnClickListener(v -> filePickerLauncher.launch("*/*"));
+        if (removeAttachmentButton != null) removeAttachmentButton.setOnClickListener(v -> clearPendingAttachment());
+
         sendButton.setOnClickListener(v -> {
             String text = messageEditText.getText().toString().trim();
-            if (!text.isEmpty()) {
+            if (!text.isEmpty() || pendingBase64 != null) {
                 sendMessage(text);
             }
         });
 
         openClawClient.connect();
-
         return view;
+    }
+
+    private void processSelectedFile(Uri uri) {
+        if (getContext() == null) return;
+
+        ContentResolver resolver = getContext().getContentResolver();
+        pendingMimeType = resolver.getType(uri);
+        if (pendingMimeType == null) pendingMimeType = "application/octet-stream";
+
+        new Thread(() -> {
+            try {
+                File cacheDir = getContext().getCacheDir();
+                File localFile = new File(cacheDir, "upload_" + System.currentTimeMillis() + ".jpg");
+                FileOutputStream fos = new FileOutputStream(localFile);
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+
+                // BILDER-ZAUBER: Herunterskalieren für die KI, damit es nicht zu groß für den WebSocket wird!
+                if (pendingMimeType.startsWith("image/")) {
+                    InputStream is = resolver.openInputStream(uri);
+                    Bitmap original = BitmapFactory.decodeStream(is);
+                    is.close();
+
+                    int maxDim = 1200; // Perfekte Größe für OpenClaw Vision Modelle
+                    int w = original.getWidth();
+                    int h = original.getHeight();
+
+                    Bitmap finalBitmap = original;
+                    if (w > maxDim || h > maxDim) {
+                        float ratio = Math.min((float) maxDim / w, (float) maxDim / h);
+                        finalBitmap = Bitmap.createScaledBitmap(original, Math.round(w * ratio), Math.round(h * ratio), true);
+                        if (finalBitmap != original) original.recycle();
+                    }
+
+                    // Komprimieren als JPEG (85% Qualität ist kaum ein Verlust, aber extrem kleine Dateigröße)
+                    finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, fos);
+                    finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer);
+
+                    pendingMimeType = "image/jpeg"; // Immer sauberes JPEG an den Server schicken
+                }
+                // Für Videos und Audio (Einfach 1:1 kopieren)
+                else {
+                    InputStream is = resolver.openInputStream(uri);
+                    int nRead;
+                    byte[] data = new byte[16384];
+                    while ((nRead = is.read(data, 0, data.length)) != -1) {
+                        buffer.write(data, 0, nRead);
+                        fos.write(data, 0, nRead);
+                    }
+                    is.close();
+                }
+
+                fos.flush();
+                fos.close();
+
+                byte[] fileBytes = buffer.toByteArray();
+                pendingBase64 = Base64.encodeToString(fileBytes, Base64.NO_WRAP);
+                pendingUriString = Uri.fromFile(localFile).toString();
+
+                mainHandler.post(() -> {
+                    attachmentPreviewLayout.setVisibility(View.VISIBLE);
+                    if (pendingMimeType.startsWith("image/")) {
+                        attachmentPreviewImage.setImageURI(Uri.parse(pendingUriString));
+                    } else {
+                        attachmentPreviewImage.setImageDrawable(null);
+                        attachmentPreviewImage.setBackgroundColor(Color.GRAY);
+                    }
+                    attachButton.setColorFilter(Color.parseColor("#77DD77")); // Grün
+                });
+            } catch (Exception e) {
+                e.printStackTrace();
+                mainHandler.post(() -> {
+                    Toast.makeText(getContext(), "Fehler beim Laden (Datei zu groß?)", Toast.LENGTH_SHORT).show();
+                    clearPendingAttachment();
+                });
+            }
+        }).start();
+    }
+
+    private void clearPendingAttachment() {
+        pendingBase64 = null;
+        pendingMimeType = null;
+        pendingUriString = null;
+        if (attachButton != null) attachButton.clearColorFilter();
+        if (attachmentPreviewLayout != null) attachmentPreviewLayout.setVisibility(View.GONE);
+        if (attachmentPreviewImage != null) attachmentPreviewImage.setImageDrawable(null);
+    }
+
+    // ... existing showMessageMenu and updateStatusUI code ...
+
+    private void showMessageMenu(ChatMessage message, View anchorView) {
+        if (getContext() == null) return;
+        PopupMenu popup = new PopupMenu(getContext(), anchorView);
+        popup.getMenu().add(0, 1, 0, "📋 Kopieren");
+        popup.getMenu().add(0, 2, 1, "↩️ Antworten");
+        popup.getMenu().add(0, 3, 2, "↗️ Weiterleiten");
+
+        popup.setOnMenuItemClickListener(item -> {
+            switch (item.getItemId()) {
+                case 1:
+                    ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                    ClipData clip = ClipData.newPlainText("Nachricht", message.getText());
+                    if (clipboard != null) clipboard.setPrimaryClip(clip);
+                    Toast.makeText(getContext(), "Nachricht kopiert", Toast.LENGTH_SHORT).show();
+                    return true;
+                case 2:
+                    String prefix = message.isUser() ? "Du: " : "OpenClaw: ";
+                    String quote = "> " + prefix + message.getText().replace("\n", "\n> ") + "\n\n";
+                    messageEditText.setText(quote);
+                    messageEditText.setSelection(quote.length());
+                    messageEditText.requestFocus();
+                    return true;
+                case 3:
+                    Intent sendIntent = new Intent();
+                    sendIntent.setAction(Intent.ACTION_SEND);
+                    sendIntent.putExtra(Intent.EXTRA_TEXT, message.getText());
+                    sendIntent.setType("text/plain");
+                    Intent shareIntent = Intent.createChooser(sendIntent, "Weiterleiten an...");
+                    startActivity(shareIntent);
+                    return true;
+            }
+            return false;
+        });
+        popup.show();
     }
 
     private void updateStatusUI(int color, String text) {
@@ -155,18 +327,19 @@ public class EchoFragment extends Fragment {
     }
 
     private void sendMessage(String text) {
-        // Echte User-Nachricht
-        addMessageToUI(new ChatMessage(text, true, false));
+        ChatMessage newMsg = new ChatMessage(text, true, false, pendingUriString, pendingMimeType);
+        addMessageToUI(newMsg);
+
+        openClawClient.sendChatMessage(text, pendingBase64, pendingMimeType);
+
         messageEditText.setText("");
-        openClawClient.sendChatMessage(text);
+        clearPendingAttachment();
     }
 
     private void addMessageToUI(ChatMessage message) {
         chatAdapter.addMessage(message);
         chatRecyclerView.scrollToPosition(chatAdapter.getItemCount() - 1);
-
-        // Speichere den Verlauf
-        if (!message.isSystem()) {
+        if (!message.isSystem() && !message.isTypingIndicator()) {
             saveChatHistory();
         }
     }
@@ -174,14 +347,13 @@ public class EchoFragment extends Fragment {
     private void saveChatHistory() {
         if (getContext() == null) return;
         SharedPreferences prefs = getContext().getSharedPreferences(PREF_CHAT_HISTORY, Context.MODE_PRIVATE);
-
         List<ChatMessage> toSave = new ArrayList<>();
         for (ChatMessage msg : chatAdapter.getMessages()) {
-            if (!msg.isSystem()) {
+            // Die Tipp-Animation niemals speichern!
+            if (!msg.isSystem() && !msg.isTypingIndicator()) {
                 toSave.add(msg);
             }
         }
-
         String json = gson.toJson(toSave);
         prefs.edit().putString(KEY_MESSAGES, json).apply();
     }
@@ -190,7 +362,6 @@ public class EchoFragment extends Fragment {
         if (getContext() == null) return;
         SharedPreferences prefs = getContext().getSharedPreferences(PREF_CHAT_HISTORY, Context.MODE_PRIVATE);
         String json = prefs.getString(KEY_MESSAGES, null);
-
         if (json != null) {
             Type type = new TypeToken<ArrayList<ChatMessage>>() {}.getType();
             List<ChatMessage> savedMessages = gson.fromJson(json, type);

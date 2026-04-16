@@ -1,14 +1,18 @@
 package com.example.unicontrol.adapters;
 
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.net.Uri;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.unicontrol.R;
@@ -25,9 +29,17 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private static final int VIEW_TYPE_SYSTEM = 3;
 
     private List<ChatMessage> messages = new ArrayList<>();
-    private int themeColor = Color.parseColor("#AEC6CF"); // Fallback-Farbe
+    private int themeColor = Color.parseColor("#AEC6CF");
 
-    // NEU: Setzt die Farbe aus den Einstellungen!
+    public interface MessageClickListener {
+        void onMessageLongClick(ChatMessage message, View anchorView);
+    }
+    private MessageClickListener messageClickListener;
+
+    public void setMessageClickListener(MessageClickListener listener) {
+        this.messageClickListener = listener;
+    }
+
     public void setThemeColor(int color) {
         this.themeColor = color;
         notifyDataSetChanged();
@@ -47,6 +59,15 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         notifyItemInserted(messages.size() - 1);
     }
 
+    // NEU: Damit können wir das "KI schreibt..." wieder verschwinden lassen
+    public void removeMessage(ChatMessage message) {
+        int index = messages.indexOf(message);
+        if (index >= 0) {
+            messages.remove(index);
+            notifyItemRemoved(index);
+        }
+    }
+
     @Override
     public int getItemViewType(int position) {
         ChatMessage msg = messages.get(position);
@@ -63,7 +84,6 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         if (viewType == VIEW_TYPE_USER) {
             return new MessageViewHolder(inflater.inflate(R.layout.item_chat_user, parent, false));
         } else {
-            // Agent & System teilen sich das gleiche Layout, System wird aber in onBind anders gestylt
             return new MessageViewHolder(inflater.inflate(R.layout.item_chat_agent, parent, false));
         }
     }
@@ -78,13 +98,39 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         int viewType = getItemViewType(position);
 
         if (viewType == VIEW_TYPE_USER) {
-            // User-Nachricht: Hintergrund auf Theme-Farbe setzen!
-            if (vh.cardView != null) {
-                vh.cardView.setCardBackgroundColor(themeColor);
+            if (vh.cardView != null) vh.cardView.setCardBackgroundColor(themeColor);
+            boolean isDark = ColorUtils.calculateLuminance(themeColor) < 0.5;
+            vh.tvMessage.setTextColor(isDark ? Color.WHITE : Color.parseColor("#333333"));
+            vh.tvMessage.setTypeface(null, Typeface.NORMAL);
+
+            if (msg.hasAttachment() && vh.ivAttachment != null) {
+                if (msg.getMimeType() != null && msg.getMimeType().startsWith("image/")) {
+                    try {
+                        Uri uri = Uri.parse(msg.getAttachmentUri());
+                        if ("content".equals(uri.getScheme())) {
+                            vh.ivAttachment.setVisibility(View.GONE);
+                        } else {
+                            vh.ivAttachment.setVisibility(View.VISIBLE);
+                            vh.ivAttachment.setImageURI(uri);
+                        }
+                    } catch (Exception e) {
+                        vh.ivAttachment.setVisibility(View.GONE);
+                        e.printStackTrace();
+                    }
+                } else {
+                    vh.ivAttachment.setVisibility(View.GONE);
+                }
+            } else if (vh.ivAttachment != null) {
+                vh.ivAttachment.setVisibility(View.GONE);
             }
-            vh.tvMessage.setTextColor(Color.parseColor("#333333")); // Dunkle Schrift auf farbigem Grund
+
+            if (msg.getText() == null || msg.getText().isEmpty()) {
+                vh.tvMessage.setVisibility(View.GONE);
+            } else {
+                vh.tvMessage.setVisibility(View.VISIBLE);
+            }
+
         } else if (viewType == VIEW_TYPE_SYSTEM) {
-            // System-Nachricht: Zentriert, transparent (ohne Hintergrund)
             if (vh.cardView != null) {
                 vh.cardView.setCardBackgroundColor(Color.TRANSPARENT);
                 vh.cardView.setCardElevation(0f);
@@ -92,10 +138,14 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 params.gravity = Gravity.CENTER;
                 vh.cardView.setLayoutParams(params);
             }
-            vh.tvMessage.setTextColor(Color.parseColor("#888888")); // Grauer kleiner Text
+            vh.tvMessage.setTextColor(Color.parseColor("#888888"));
             vh.tvMessage.setTextSize(12f);
+            vh.tvMessage.setTypeface(null, Typeface.NORMAL);
+            if (vh.ivAttachment != null) vh.ivAttachment.setVisibility(View.GONE);
+            vh.tvMessage.setVisibility(View.VISIBLE);
+
         } else {
-            // Agent-Nachricht: Weißer Hintergrund
+            // AGENT (Links)
             if (vh.cardView != null) {
                 vh.cardView.setCardBackgroundColor(Color.WHITE);
                 vh.cardView.setCardElevation(1f);
@@ -103,8 +153,30 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 params.gravity = Gravity.START;
                 vh.cardView.setLayoutParams(params);
             }
-            vh.tvMessage.setTextColor(Color.parseColor("#333333"));
+
+            // NEU: Wenn es die "KI schreibt..." Blase ist, machen wir sie grau und kursiv!
+            if (msg.isTypingIndicator()) {
+                vh.tvMessage.setTextColor(Color.parseColor("#999999"));
+                vh.tvMessage.setTypeface(null, Typeface.ITALIC);
+            } else {
+                vh.tvMessage.setTextColor(Color.parseColor("#333333"));
+                vh.tvMessage.setTypeface(null, Typeface.NORMAL);
+            }
+
             vh.tvMessage.setTextSize(16f);
+            if (vh.ivAttachment != null) vh.ivAttachment.setVisibility(View.GONE);
+            vh.tvMessage.setVisibility(View.VISIBLE);
+        }
+
+        if (vh.cardView != null) {
+            vh.cardView.setOnLongClickListener(v -> {
+                // Das Popup-Menü darf bei der "Tippt gerade..." Blase nicht aufgehen
+                if (messageClickListener != null && !msg.isSystem() && !msg.isTypingIndicator()) {
+                    messageClickListener.onMessageLongClick(msg, vh.cardView);
+                    return true;
+                }
+                return false;
+            });
         }
     }
 
@@ -116,11 +188,13 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     static class MessageViewHolder extends RecyclerView.ViewHolder {
         TextView tvMessage;
         MaterialCardView cardView;
+        ImageView ivAttachment;
 
         MessageViewHolder(View itemView) {
             super(itemView);
             tvMessage = itemView.findViewById(R.id.tvMessage);
             cardView = itemView.findViewById(R.id.messageCard);
+            ivAttachment = itemView.findViewById(R.id.ivAttachment);
         }
     }
 }

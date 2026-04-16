@@ -18,13 +18,28 @@
         app:cardCornerRadius="16dp"
         app:cardElevation="1dp">
 
-        <TextView
-            android:id="@+id/tvMessage"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:padding="12dp"
-            android:textColor="#333333"
-            android:textSize="16sp" />
+            android:orientation="vertical">
+
+            <!-- NEU: Das Bild, das wir mitsenden -->
+            <ImageView
+                android:id="@+id/ivAttachment"
+                android:layout_width="200dp"
+                android:layout_height="200dp"
+                android:scaleType="centerCrop"
+                android:visibility="gone" />
+
+            <!-- Der Text darunter -->
+            <TextView
+                android:id="@+id/tvMessage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:textColor="#333333"
+                android:textSize="16sp" />
+        </LinearLayout>
 
     </com.google.android.material.card.MaterialCardView>
 

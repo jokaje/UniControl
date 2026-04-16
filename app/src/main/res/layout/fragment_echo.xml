@@ -8,7 +8,7 @@
     android:background="#F5F5F5"
     tools:context=".fragments.EchoFragment">
 
-    <!-- NEU: Eleganter Status-Indikator oben links -->
+    <!-- Status-Indikator oben links -->
     <LinearLayout
         android:id="@+id/statusLayout"
         android:layout_width="match_parent"
@@ -29,7 +29,7 @@
             android:id="@+id/statusIndicator"
             android:layout_width="10dp"
             android:layout_height="10dp"
-            android:background="@drawable/bg_pill_selected" /> <!-- Wird per Code zum farbigen Kreis -->
+            android:background="@drawable/bg_pill_selected" />
 
         <TextView
             android:id="@+id/statusText"
@@ -43,7 +43,6 @@
     </LinearLayout>
 
     <!-- Liste für die Chat-Nachrichten -->
-    <!-- WICHTIG: Startet jetzt UNTERHALB des statusLayouts -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/chatRecyclerView"
         android:layout_width="0dp"
@@ -51,9 +50,46 @@
         android:padding="8dp"
         android:clipToPadding="false"
         app:layout_constraintTop_toBottomOf="@+id/statusLayout"
-        app:layout_constraintBottom_toTopOf="@+id/inputLayout"
+        app:layout_constraintBottom_toTopOf="@+id/attachmentPreviewLayout"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- NEU: Anhang Vorschau (Standardmäßig versteckt) -->
+    <RelativeLayout
+        android:id="@+id/attachmentPreviewLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="8dp"
+        android:visibility="gone"
+        android:background="#E0E0E0"
+        app:layout_constraintBottom_toTopOf="@+id/inputLayout">
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="100dp"
+            android:layout_height="100dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp">
+
+            <ImageView
+                android:id="@+id/attachmentPreviewImage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:background="#CCCCCC"/>
+        </com.google.android.material.card.MaterialCardView>
+
+        <ImageButton
+            android:id="@+id/removeAttachmentButton"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="84dp"
+            android:layout_marginTop="-8dp"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:background="@drawable/bg_pill_selected"
+            android:backgroundTint="#88000000"
+            app:tint="@android:color/white"
+            android:elevation="4dp"/>
+    </RelativeLayout>
 
     <!-- Eingabebereich unten -->
     <LinearLayout
@@ -61,12 +97,22 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
+        android:gravity="bottom"
         android:padding="8dp"
         android:background="@android:color/white"
         android:elevation="4dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
+
+        <ImageButton
+            android:id="@+id/attachButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_add"
+            app:tint="#888888"
+            android:contentDescription="Anhang hinzufügen" />
 
         <EditText
             android:id="@+id/messageEditText"
