@@ -23,6 +23,9 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
 
+    <!-- NEU: Erlaubnis für Sprachnachrichten an Echo -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <!-- NFC Berechtigungen -->
     <uses-permission android:name="android.permission.NFC" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />

@@ -55,4 +55,5 @@ dependencies {
     // --- OpenClaw Chat Integration ---
     implementation libs.okhttp
     implementation libs.bcprov.jdk15to18
+    implementation libs.core
 }

@@ -22,6 +22,8 @@ import com.google.android.material.card.MaterialCardView;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.noties.markwon.Markwon;
+
 public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     private static final int VIEW_TYPE_USER = 1;
@@ -30,6 +32,9 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     private List<ChatMessage> messages = new ArrayList<>();
     private int themeColor = Color.parseColor("#AEC6CF");
+
+    // NEU: Unser Markdown Parser
+    private Markwon markwon;
 
     public interface MessageClickListener {
         void onMessageLongClick(ChatMessage message, View anchorView);
@@ -59,7 +64,6 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         notifyItemInserted(messages.size() - 1);
     }
 
-    // NEU: Damit können wir das "KI schreibt..." wieder verschwinden lassen
     public void removeMessage(ChatMessage message) {
         int index = messages.indexOf(message);
         if (index >= 0) {
@@ -80,6 +84,11 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     @NonNull
     @Override
     public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        // Markwon wird beim ersten Mal initialisiert
+        if (markwon == null) {
+            markwon = Markwon.create(parent.getContext());
+        }
+
         LayoutInflater inflater = LayoutInflater.from(parent.getContext());
         if (viewType == VIEW_TYPE_USER) {
             return new MessageViewHolder(inflater.inflate(R.layout.item_chat_user, parent, false));
@@ -92,8 +101,6 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
         ChatMessage msg = messages.get(position);
         MessageViewHolder vh = (MessageViewHolder) holder;
-
-        vh.tvMessage.setText(msg.getText());
 
         int viewType = getItemViewType(position);
 
@@ -128,6 +135,8 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 vh.tvMessage.setVisibility(View.GONE);
             } else {
                 vh.tvMessage.setVisibility(View.VISIBLE);
+                // Text normal setzen (eigene Nachrichten formatieren wir meist nicht)
+                vh.tvMessage.setText(msg.getText());
             }
 
         } else if (viewType == VIEW_TYPE_SYSTEM) {
@@ -143,6 +152,7 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             vh.tvMessage.setTypeface(null, Typeface.NORMAL);
             if (vh.ivAttachment != null) vh.ivAttachment.setVisibility(View.GONE);
             vh.tvMessage.setVisibility(View.VISIBLE);
+            vh.tvMessage.setText(msg.getText());
 
         } else {
             // AGENT (Links)
@@ -154,13 +164,18 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 vh.cardView.setLayoutParams(params);
             }
 
-            // NEU: Wenn es die "KI schreibt..." Blase ist, machen wir sie grau und kursiv!
             if (msg.isTypingIndicator()) {
                 vh.tvMessage.setTextColor(Color.parseColor("#999999"));
                 vh.tvMessage.setTypeface(null, Typeface.ITALIC);
+                vh.tvMessage.setText(msg.getText());
             } else {
                 vh.tvMessage.setTextColor(Color.parseColor("#333333"));
                 vh.tvMessage.setTypeface(null, Typeface.NORMAL);
+
+                // --- NEU: HIER PASSIERT DIE MARKDOWN MAGIE! ---
+                if (msg.getText() != null) {
+                    markwon.setMarkdown(vh.tvMessage, msg.getText());
+                }
             }
 
             vh.tvMessage.setTextSize(16f);
@@ -170,7 +185,6 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
         if (vh.cardView != null) {
             vh.cardView.setOnLongClickListener(v -> {
-                // Das Popup-Menü darf bei der "Tippt gerade..." Blase nicht aufgehen
                 if (messageClickListener != null && !msg.isSystem() && !msg.isTypingIndicator()) {
                     messageClickListener.onMessageLongClick(msg, vh.cardView);
                     return true;

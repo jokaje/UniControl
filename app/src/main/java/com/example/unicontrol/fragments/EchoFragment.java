@@ -1,5 +1,6 @@
 package com.example.unicontrol.fragments;
 
+import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -8,17 +9,22 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Base64;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
@@ -48,6 +54,7 @@ import com.google.gson.reflect.TypeToken;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.lang.reflect.Type;
@@ -79,12 +86,19 @@ public class EchoFragment extends Fragment {
     private Handler mainHandler = new Handler(Looper.getMainLooper());
     private Gson gson = new Gson();
 
+    private int currentThemeColor;
+
     private String pendingBase64 = null;
     private String pendingMimeType = null;
     private String pendingUriString = null;
 
     private ChatMessage typingMessage = null;
     private SharedViewModel sharedViewModel;
+
+    // --- NEU: Variablen für die Audio-Aufnahme ---
+    private MediaRecorder mediaRecorder;
+    private String audioFilePath = null;
+    private boolean isRecording = false;
 
     private final BroadcastReceiver echoReceiver = new BroadcastReceiver() {
         @Override
@@ -144,13 +158,13 @@ public class EchoFragment extends Fragment {
 
         SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
         String echoColorHex = prefs.getString(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF");
-        int themeColor = Color.parseColor("#AEC6CF");
-        try { themeColor = Color.parseColor(echoColorHex); } catch (Exception ignored) {}
+        currentThemeColor = Color.parseColor("#AEC6CF");
+        try { currentThemeColor = Color.parseColor(echoColorHex); } catch (Exception ignored) {}
 
-        chatAdapter.setThemeColor(themeColor);
+        chatAdapter.setThemeColor(currentThemeColor);
         messageEditText.setTextColor(Color.parseColor("#333333"));
         messageEditText.setHintTextColor(Color.parseColor("#888888"));
-        sendButton.setColorFilter(themeColor);
+        sendButton.setColorFilter(currentThemeColor);
 
         chatAdapter.setMessageClickListener(this::showMessageMenu);
         updateStatusUI(Color.parseColor("#FFB347"), "Warte auf Dienst...");
@@ -167,19 +181,138 @@ public class EchoFragment extends Fragment {
         if (attachButton != null) attachButton.setOnClickListener(v -> filePickerLauncher.launch("*/*"));
         if (removeAttachmentButton != null) removeAttachmentButton.setOnClickListener(v -> clearPendingAttachment());
 
-        sendButton.setOnClickListener(v -> {
-            String text = messageEditText.getText().toString().trim();
-            if (!text.isEmpty() || pendingBase64 != null) {
-                sendMessage(text);
+        // --- NEU: Text-Watcher für das Icon-Switching (Mic vs. Senden) ---
+        messageEditText.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                updateSendButtonIcon();
             }
         });
+        updateSendButtonIcon();
 
-        // Hintergrunddienst starten (falls er nicht schon läuft)
+        // --- NEU: Touch-Listener für Senden UND Aufnehmen ---
+        sendButton.setOnTouchListener((v, event) -> {
+            boolean hasContent = !messageEditText.getText().toString().trim().isEmpty() || pendingBase64 != null;
+
+            if (hasContent) {
+                // NORMALES SENDEN (Text oder Bild)
+                if (event.getAction() == MotionEvent.ACTION_UP) {
+                    sendMessage(messageEditText.getText().toString().trim());
+                    v.performClick(); // Löst den Klick-Sound vom System aus
+                }
+                return true;
+            } else {
+                // SPRACHNACHRICHT AUFNEHMEN
+                if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                    if (checkAudioPermission()) {
+                        startRecording();
+                        sendButton.setColorFilter(Color.parseColor("#FF6961")); // Button wird Rot
+                        messageEditText.setHint("🎤 Aufnahme läuft... (Loslassen zum Senden)");
+                    }
+                    return true;
+                } else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+                    if (isRecording) {
+                        stopRecordingAndSend();
+                        sendButton.setColorFilter(currentThemeColor); // Wieder normale Farbe
+                        messageEditText.setHint("Frag OpenClaw etwas...");
+                    }
+                    return true;
+                }
+            }
+            return false;
+        });
+
         Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
         ContextCompat.startForegroundService(requireContext(), serviceIntent);
 
         return view;
     }
+
+    // --- NEU: Hilfsmethoden für Audio ---
+    private void updateSendButtonIcon() {
+        if (getContext() == null || sendButton == null) return;
+        boolean hasContent = !messageEditText.getText().toString().trim().isEmpty() || pendingBase64 != null;
+        if (hasContent) {
+            sendButton.setImageResource(android.R.drawable.ic_menu_send);
+        } else {
+            sendButton.setImageResource(android.R.drawable.ic_btn_speak_now);
+        }
+    }
+
+    private boolean checkAudioPermission() {
+        if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1005);
+            return false;
+        }
+        return true;
+    }
+
+    private void startRecording() {
+        if (getContext() == null) return;
+        audioFilePath = getContext().getCacheDir().getAbsolutePath() + "/audiomsg_" + System.currentTimeMillis() + ".m4a";
+        mediaRecorder = new MediaRecorder();
+        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+        mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+        mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+        mediaRecorder.setOutputFile(audioFilePath);
+        try {
+            mediaRecorder.prepare();
+            mediaRecorder.start();
+            isRecording = true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(getContext(), "Fehler beim Start der Audio-Aufnahme", Toast.LENGTH_SHORT).show();
+            isRecording = false;
+        }
+    }
+
+    private void stopRecordingAndSend() {
+        if (mediaRecorder != null && isRecording) {
+            try {
+                mediaRecorder.stop();
+                mediaRecorder.release();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            mediaRecorder = null;
+            isRecording = false;
+
+            File audioFile = new File(audioFilePath);
+            if (audioFile.exists()) {
+                try (InputStream is = new FileInputStream(audioFile)) {
+                    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                    int nRead;
+                    byte[] data = new byte[16384];
+                    while ((nRead = is.read(data, 0, data.length)) != -1) {
+                        buffer.write(data, 0, nRead);
+                    }
+                    buffer.flush();
+                    byte[] fileBytes = buffer.toByteArray();
+                    String base64 = Base64.encodeToString(fileBytes, Base64.NO_WRAP);
+
+                    // Lokal in die UI einfügen (wird nur als "🎤 Sprachnachricht" Text angezeigt)
+                    // (Einen echten Audio-Player können wir später jederzeit in den Adapter nachrüsten!)
+                    ChatMessage newMsg = new ChatMessage("🎤 Sprachnachricht gesendet", true, false, Uri.fromFile(audioFile).toString(), "audio/mp4");
+                    chatAdapter.addMessage(newMsg);
+                    chatRecyclerView.scrollToPosition(chatAdapter.getItemCount() - 1);
+                    saveChatHistory();
+
+                    // Datei an den Hintergrunddienst zum Senden an OpenClaw übergeben
+                    Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
+                    serviceIntent.setAction("SEND_MESSAGE");
+                    serviceIntent.putExtra("text", "Ich habe dir eine Sprachnachricht gesendet.");
+                    serviceIntent.putExtra("base64", base64);
+                    serviceIntent.putExtra("mimeType", "audio/mp4");
+                    requireContext().startService(serviceIntent);
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+    // ------------------------------------
 
     private void handleStatusUpdate(String status) {
         int color = Color.parseColor("#FFB347");
@@ -217,7 +350,6 @@ public class EchoFragment extends Fragment {
 
         loadChatHistory();
 
-        // NEU: Dienst aktiv nach dem Status fragen!
         Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
         serviceIntent.setAction("REQUEST_STATUS");
         requireContext().startService(serviceIntent);
@@ -337,6 +469,7 @@ public class EchoFragment extends Fragment {
                         attachmentPreviewImage.setBackgroundColor(Color.GRAY);
                     }
                     attachButton.setColorFilter(Color.parseColor("#77DD77"));
+                    updateSendButtonIcon(); // NEU: Icon aktualisieren!
                 });
             } catch (Exception e) {
                 mainHandler.post(() -> {
@@ -354,6 +487,7 @@ public class EchoFragment extends Fragment {
         if (attachButton != null) attachButton.clearColorFilter();
         if (attachmentPreviewLayout != null) attachmentPreviewLayout.setVisibility(View.GONE);
         if (attachmentPreviewImage != null) attachmentPreviewImage.setImageDrawable(null);
+        updateSendButtonIcon(); // NEU: Icon aktualisieren!
     }
 
     private void showMessageMenu(ChatMessage message, View anchorView) {
