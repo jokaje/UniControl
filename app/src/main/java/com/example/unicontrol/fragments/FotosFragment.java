@@ -50,6 +50,7 @@ import androidx.core.content.FileProvider;
 import androidx.core.graphics.ColorUtils;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.fragment.app.Fragment;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -70,6 +71,7 @@ import com.example.unicontrol.models.ImmichAsset;
 import com.example.unicontrol.models.ImmichMemory;
 import com.example.unicontrol.models.ImmichPerson;
 import com.example.unicontrol.utils.NetworkUtils;
+import com.example.unicontrol.viewmodels.SharedViewModel;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.button.MaterialButton;
@@ -829,6 +831,16 @@ public class FotosFragment extends Fragment {
         LinearLayout container = sheetView.findViewById(R.id.layout_bs_container);
 
         tvTitle.setText(assetsToModify.size() + (assetsToModify.size() == 1 ? " Element ausgewählt" : " Elemente ausgewählt"));
+
+        // NEU: "An Echo senden" im Auswahl-Menü (nur bei 1 Bild sinnvoll)
+        if (assetsToModify.size() == 1) {
+            TextView optEcho = createBottomSheetOption("💬  An Echo senden");
+            optEcho.setOnClickListener(v -> {
+                sendToEcho(assetsToModify.get(0));
+                dialog.dismiss();
+            });
+            container.addView(optEcho);
+        }
 
         TextView optAlbum = createBottomSheetOption("📂  Zu Album hinzufügen");
         optAlbum.setOnClickListener(v -> loadAndShowAlbumsInBottomSheet(dialog, tvTitle, container, assetsToModify));
@@ -2566,6 +2578,7 @@ public class FotosFragment extends Fragment {
             if (getContext() == null || currentViewedAsset == null) return;
             PopupMenu popup = new PopupMenu(getContext(), v);
             popup.getMenu().add("Details einblenden");
+            popup.getMenu().add("An Echo senden");
 
             if (currentViewedAlbumId != null) {
                 popup.getMenu().add("Aus Album entfernen");
@@ -2575,6 +2588,9 @@ public class FotosFragment extends Fragment {
                 String title = item.getTitle().toString();
                 if (title.equals("Details einblenden") && bottomSheetBehavior != null) {
                     bottomSheetBehavior.setState(BottomSheetBehavior.STATE_EXPANDED);
+                }
+                else if (title.equals("An Echo senden")) {
+                    sendToEcho(currentViewedAsset);
                 }
                 else if (title.equals("Aus Album entfernen")) {
                     removeAssetFromAlbumServer(currentViewedAsset, currentViewedAlbumId);
@@ -3058,6 +3074,35 @@ public class FotosFragment extends Fragment {
         archiveMultipleAssets(!isUnlocking, assets);
     }
 
+    private void sendToEcho(ImmichAsset asset) {
+        if (asset == null || getActivity() == null) return;
+
+        String imageUrl;
+        if (asset.isLocalOnly && asset.localUri != null) {
+            imageUrl = asset.localUri;
+        } else {
+            String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
+            imageUrl = cleanBaseUrl + "/api/assets/" + asset.id + "/original";
+        }
+
+        SharedViewModel sharedViewModel = new ViewModelProvider(requireActivity()).get(SharedViewModel.class);
+        sharedViewModel.setPendingImageUri(imageUrl);
+
+        com.google.android.material.bottomnavigation.BottomNavigationView bottomNav = requireActivity().findViewById(R.id.bottom_navigation);
+        if (bottomNav != null) {
+            bottomNav.setSelectedItemId(R.id.nav_echo);
+        } else {
+            Toast.makeText(getContext(), "Bild an Echo gesendet!", Toast.LENGTH_SHORT).show();
+        }
+
+        if (fullscreenOverlay != null && fullscreenOverlay.getVisibility() == View.VISIBLE) {
+            closeFullscreen();
+        }
+        if (currentFotosAdapter != null) {
+            currentFotosAdapter.clearSelection();
+        }
+    }
+
     private void toggleFavoriteStatus() {
         if (currentViewedAsset == null) return;
 
@@ -3498,7 +3543,6 @@ public class FotosFragment extends Fragment {
         isStoryModeActive = isStoryMode;
         isStoryPaused = false;
 
-        // UI initial verbergen für reines Vollbild
         isFullscreenUiVisible = false;
         if (btnCloseFullscreen != null) btnCloseFullscreen.setVisibility(View.GONE);
         if (btnFavorite != null) btnFavorite.setVisibility(View.GONE);
@@ -3573,7 +3617,7 @@ public class FotosFragment extends Fragment {
             @Override
             public void onSingleTap(float x, float width) {
                 long now = System.currentTimeMillis();
-                if (now - lastTapTime < 300) return; // Verhindert Bug mit zwei übersprungenen Bildern
+                if (now - lastTapTime < 300) return;
                 lastTapTime = now;
 
                 if (isStoryModeActive) {
@@ -3622,7 +3666,7 @@ public class FotosFragment extends Fragment {
                 fillDetailsSheet(currentViewedAsset);
                 updateFullscreenUI();
 
-                isStoryPaused = false; // Beim Bildwechsel automatisch Pausenstatus zurücksetzen
+                isStoryPaused = false;
 
                 if (isStoryModeActive) {
                     if (storyProgressContainer != null) {
@@ -4375,7 +4419,6 @@ public class FotosFragment extends Fragment {
                 }
             }
 
-            // Taps robust erfassen für Menü und Weiterschalten
             holder.imageView.setOnViewTapListener((view, x, y) -> {
                 swipeListener.onSingleTap(x, view.getWidth());
             });
@@ -4384,7 +4427,6 @@ public class FotosFragment extends Fragment {
                 swipeListener.onSingleTap(x * view.getWidth(), view.getWidth());
             });
 
-            // Long Press sicher anbinden für den Pause-Modus
             holder.imageView.setOnLongClickListener(v -> {
                 swipeListener.onLongPress();
                 return true;

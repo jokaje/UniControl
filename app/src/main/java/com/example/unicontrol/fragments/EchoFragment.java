@@ -30,6 +30,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -37,6 +38,7 @@ import com.example.unicontrol.R;
 import com.example.unicontrol.adapters.ChatAdapter;
 import com.example.unicontrol.models.ChatMessage;
 import com.example.unicontrol.network.OpenClawClient;
+import com.example.unicontrol.viewmodels.SharedViewModel;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
@@ -47,6 +49,10 @@ import java.io.InputStream;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
+
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 
 public class EchoFragment extends Fragment {
 
@@ -77,8 +83,9 @@ public class EchoFragment extends Fragment {
     private String pendingMimeType = null;
     private String pendingUriString = null;
 
-    // NEU: Variable, um die "KI schreibt..." Nachricht zu verfolgen
     private ChatMessage typingMessage = null;
+
+    private SharedViewModel sharedViewModel;
 
     private final ActivityResultLauncher<String> filePickerLauncher = registerForActivityResult(
             new ActivityResultContracts.GetContent(),
@@ -131,16 +138,23 @@ public class EchoFragment extends Fragment {
         updateStatusUI(Color.parseColor("#FF6961"), "Getrennt");
         loadChatHistory();
 
+        // --- Briefkasten für Bilder aus anderen Fragmenten abrufen ---
+        sharedViewModel = new ViewModelProvider(requireActivity()).get(SharedViewModel.class);
+        sharedViewModel.getPendingImageUri().observe(getViewLifecycleOwner(), uriString -> {
+            if (uriString != null && !uriString.isEmpty()) {
+                processSelectedFile(Uri.parse(uriString));
+                sharedViewModel.clearPendingImageUri();
+            }
+        });
+
         openClawClient = new OpenClawClient(requireContext());
         openClawClient.setChatListener(new OpenClawClient.ChatListener() {
-
-            // NEU: KI fängt an zu denken
             @Override
             public void onAgentTyping() {
                 mainHandler.post(() -> {
                     if (typingMessage == null) {
                         typingMessage = new ChatMessage("KI schreibt...", false);
-                        typingMessage.setTypingIndicator(true); // Macht es grau und kursiv
+                        typingMessage.setTypingIndicator(true);
                         addMessageToUI(typingMessage);
                     }
                 });
@@ -149,7 +163,6 @@ public class EchoFragment extends Fragment {
             @Override
             public void onMessageReceived(String text) {
                 mainHandler.post(() -> {
-                    // Lösche die "KI schreibt..." Blase, bevor die echte Nachricht kommt
                     if (typingMessage != null) {
                         chatAdapter.removeMessage(typingMessage);
                         typingMessage = null;
@@ -163,12 +176,10 @@ public class EchoFragment extends Fragment {
                 mainHandler.post(() -> {
                     int color = Color.parseColor("#FFB347");
                     String shortStatus = "Verbinde...";
-
                     if (status.contains("erfolgreich") || status.contains("✅")) {
                         color = Color.parseColor("#77DD77"); shortStatus = "Verbunden";
                     } else if (status.contains("Fehler") || status.contains("❌") || status.contains("Abbruch") || status.contains("fehlgeschlagen")) {
                         color = Color.parseColor("#FF6961"); shortStatus = "Fehler";
-                        // Fehler = Tippen abbrechen
                         if (typingMessage != null) {
                             chatAdapter.removeMessage(typingMessage);
                             typingMessage = null;
@@ -198,24 +209,63 @@ public class EchoFragment extends Fragment {
     private void processSelectedFile(Uri uri) {
         if (getContext() == null) return;
 
+        String scheme = uri.getScheme();
         ContentResolver resolver = getContext().getContentResolver();
-        pendingMimeType = resolver.getType(uri);
-        if (pendingMimeType == null) pendingMimeType = "application/octet-stream";
+
+        if ("http".equals(scheme) || "https".equals(scheme)) {
+            pendingMimeType = "image/jpeg";
+        } else {
+            pendingMimeType = resolver.getType(uri);
+            if (pendingMimeType == null) pendingMimeType = "application/octet-stream";
+        }
 
         new Thread(() -> {
             try {
+                InputStream is;
+
+                // Netzwerk-Download falls das Bild aus der Cloud kommt (z.B. Immich URL)
+                if ("http".equals(scheme) || "https".equals(scheme)) {
+                    OkHttpClient httpClient = new OkHttpClient();
+                    Request.Builder reqBuilder = new Request.Builder().url(uri.toString());
+
+                    // Immich API-Key anhängen, sonst wird der Download blockiert (401/403)
+                    SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+                    String apiKey = prefs.getString(SettingsFragment.KEY_FOTOS_API_KEY, "");
+                    if (!apiKey.isEmpty()) {
+                        reqBuilder.addHeader("x-api-key", apiKey);
+                        reqBuilder.addHeader("Accept", "application/json");
+                    }
+
+                    Request req = reqBuilder.build();
+                    Response resp = httpClient.newCall(req).execute();
+
+                    if (!resp.isSuccessful() || resp.body() == null) {
+                        throw new Exception("HTTP Download Fehler: Code " + resp.code());
+                    }
+
+                    String contentType = resp.header("Content-Type");
+                    if (contentType != null) pendingMimeType = contentType;
+
+                    is = resp.body().byteStream();
+                } else {
+                    // Lokale Datei vom Gerät
+                    is = resolver.openInputStream(uri);
+                }
+
+                if (is == null) throw new Exception("Stream Fehler");
+
                 File cacheDir = getContext().getCacheDir();
                 File localFile = new File(cacheDir, "upload_" + System.currentTimeMillis() + ".jpg");
                 FileOutputStream fos = new FileOutputStream(localFile);
                 ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 
-                // BILDER-ZAUBER: Herunterskalieren für die KI, damit es nicht zu groß für den WebSocket wird!
                 if (pendingMimeType.startsWith("image/")) {
-                    InputStream is = resolver.openInputStream(uri);
                     Bitmap original = BitmapFactory.decodeStream(is);
                     is.close();
 
-                    int maxDim = 1200; // Perfekte Größe für OpenClaw Vision Modelle
+                    if (original == null) throw new Exception("Bild konnte nicht dekodiert werden.");
+
+                    int maxDim = 1200;
                     int w = original.getWidth();
                     int h = original.getHeight();
 
@@ -226,15 +276,12 @@ public class EchoFragment extends Fragment {
                         if (finalBitmap != original) original.recycle();
                     }
 
-                    // Komprimieren als JPEG (85% Qualität ist kaum ein Verlust, aber extrem kleine Dateigröße)
                     finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, fos);
                     finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer);
 
-                    pendingMimeType = "image/jpeg"; // Immer sauberes JPEG an den Server schicken
+                    pendingMimeType = "image/jpeg";
                 }
-                // Für Videos und Audio (Einfach 1:1 kopieren)
                 else {
-                    InputStream is = resolver.openInputStream(uri);
                     int nRead;
                     byte[] data = new byte[16384];
                     while ((nRead = is.read(data, 0, data.length)) != -1) {
@@ -264,7 +311,7 @@ public class EchoFragment extends Fragment {
             } catch (Exception e) {
                 e.printStackTrace();
                 mainHandler.post(() -> {
-                    Toast.makeText(getContext(), "Fehler beim Laden (Datei zu groß?)", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), "Fehler beim Laden (Netzwerk?)", Toast.LENGTH_SHORT).show();
                     clearPendingAttachment();
                 });
             }
@@ -279,8 +326,6 @@ public class EchoFragment extends Fragment {
         if (attachmentPreviewLayout != null) attachmentPreviewLayout.setVisibility(View.GONE);
         if (attachmentPreviewImage != null) attachmentPreviewImage.setImageDrawable(null);
     }
-
-    // ... existing showMessageMenu and updateStatusUI code ...
 
     private void showMessageMenu(ChatMessage message, View anchorView) {
         if (getContext() == null) return;
@@ -349,7 +394,6 @@ public class EchoFragment extends Fragment {
         SharedPreferences prefs = getContext().getSharedPreferences(PREF_CHAT_HISTORY, Context.MODE_PRIVATE);
         List<ChatMessage> toSave = new ArrayList<>();
         for (ChatMessage msg : chatAdapter.getMessages()) {
-            // Die Tipp-Animation niemals speichern!
             if (!msg.isSystem() && !msg.isTypingIndicator()) {
                 toSave.add(msg);
             }
