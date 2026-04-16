@@ -1,16 +1,19 @@
 package com.example.unicontrol.fragments;
 
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -29,6 +32,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -37,7 +41,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.example.unicontrol.R;
 import com.example.unicontrol.adapters.ChatAdapter;
 import com.example.unicontrol.models.ChatMessage;
-import com.example.unicontrol.network.OpenClawClient;
+import com.example.unicontrol.services.OpenClawService;
 import com.example.unicontrol.viewmodels.SharedViewModel;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
@@ -56,7 +60,6 @@ import okhttp3.Response;
 
 public class EchoFragment extends Fragment {
 
-    private static final String TAG = "EchoFragment";
     private static final String PREF_CHAT_HISTORY = "chat_history_prefs";
     private static final String KEY_MESSAGES = "chat_messages_list";
 
@@ -73,26 +76,48 @@ public class EchoFragment extends Fragment {
     private TextView statusText;
 
     private ChatAdapter chatAdapter;
-    private OpenClawClient openClawClient;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
     private Gson gson = new Gson();
-
-    private int currentThemeColor;
 
     private String pendingBase64 = null;
     private String pendingMimeType = null;
     private String pendingUriString = null;
 
     private ChatMessage typingMessage = null;
-
     private SharedViewModel sharedViewModel;
+
+    private final BroadcastReceiver echoReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if ("com.example.unicontrol.ECHO_NEW_MESSAGE".equals(action)) {
+                String text = intent.getStringExtra("text");
+                if (typingMessage != null) {
+                    chatAdapter.removeMessage(typingMessage);
+                    typingMessage = null;
+                }
+                chatAdapter.addMessage(new ChatMessage(text, false, false, null, null));
+                chatRecyclerView.scrollToPosition(chatAdapter.getItemCount() - 1);
+            }
+            else if ("com.example.unicontrol.ECHO_TYPING".equals(action)) {
+                if (typingMessage == null) {
+                    typingMessage = new ChatMessage("KI schreibt...", false);
+                    typingMessage.setTypingIndicator(true);
+                    chatAdapter.addMessage(typingMessage);
+                    chatRecyclerView.scrollToPosition(chatAdapter.getItemCount() - 1);
+                }
+            }
+            else if ("com.example.unicontrol.ECHO_STATUS".equals(action)) {
+                String status = intent.getStringExtra("status");
+                if (status != null) handleStatusUpdate(status);
+            }
+        }
+    };
 
     private final ActivityResultLauncher<String> filePickerLauncher = registerForActivityResult(
             new ActivityResultContracts.GetContent(),
             uri -> {
-                if (uri != null) {
-                    processSelectedFile(uri);
-                }
+                if (uri != null) processSelectedFile(uri);
             }
     );
 
@@ -107,7 +132,6 @@ public class EchoFragment extends Fragment {
         attachButton = view.findViewById(R.id.attachButton);
         statusIndicator = view.findViewById(R.id.statusIndicator);
         statusText = view.findViewById(R.id.statusText);
-
         attachmentPreviewLayout = view.findViewById(R.id.attachmentPreviewLayout);
         attachmentPreviewImage = view.findViewById(R.id.attachmentPreviewImage);
         removeAttachmentButton = view.findViewById(R.id.removeAttachmentButton);
@@ -120,75 +144,23 @@ public class EchoFragment extends Fragment {
 
         SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
         String echoColorHex = prefs.getString(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF");
-        try {
-            currentThemeColor = Color.parseColor(echoColorHex);
-        } catch (Exception e) {
-            currentThemeColor = Color.parseColor("#AEC6CF");
-        }
+        int themeColor = Color.parseColor("#AEC6CF");
+        try { themeColor = Color.parseColor(echoColorHex); } catch (Exception ignored) {}
 
-        chatAdapter.setThemeColor(currentThemeColor);
+        chatAdapter.setThemeColor(themeColor);
         messageEditText.setTextColor(Color.parseColor("#333333"));
         messageEditText.setHintTextColor(Color.parseColor("#888888"));
-        sendButton.setColorFilter(currentThemeColor);
+        sendButton.setColorFilter(themeColor);
 
-        chatAdapter.setMessageClickListener((message, anchorView) -> {
-            showMessageMenu(message, anchorView);
-        });
-
-        updateStatusUI(Color.parseColor("#FF6961"), "Getrennt");
+        chatAdapter.setMessageClickListener(this::showMessageMenu);
+        updateStatusUI(Color.parseColor("#FFB347"), "Warte auf Dienst...");
         loadChatHistory();
 
-        // --- Briefkasten für Bilder aus anderen Fragmenten abrufen ---
         sharedViewModel = new ViewModelProvider(requireActivity()).get(SharedViewModel.class);
         sharedViewModel.getPendingImageUri().observe(getViewLifecycleOwner(), uriString -> {
             if (uriString != null && !uriString.isEmpty()) {
                 processSelectedFile(Uri.parse(uriString));
                 sharedViewModel.clearPendingImageUri();
-            }
-        });
-
-        openClawClient = new OpenClawClient(requireContext());
-        openClawClient.setChatListener(new OpenClawClient.ChatListener() {
-            @Override
-            public void onAgentTyping() {
-                mainHandler.post(() -> {
-                    if (typingMessage == null) {
-                        typingMessage = new ChatMessage("KI schreibt...", false);
-                        typingMessage.setTypingIndicator(true);
-                        addMessageToUI(typingMessage);
-                    }
-                });
-            }
-
-            @Override
-            public void onMessageReceived(String text) {
-                mainHandler.post(() -> {
-                    if (typingMessage != null) {
-                        chatAdapter.removeMessage(typingMessage);
-                        typingMessage = null;
-                    }
-                    addMessageToUI(new ChatMessage(text, false, false, null, null));
-                });
-            }
-
-            @Override
-            public void onConnectionStatusChanged(String status) {
-                mainHandler.post(() -> {
-                    int color = Color.parseColor("#FFB347");
-                    String shortStatus = "Verbinde...";
-                    if (status.contains("erfolgreich") || status.contains("✅")) {
-                        color = Color.parseColor("#77DD77"); shortStatus = "Verbunden";
-                    } else if (status.contains("Fehler") || status.contains("❌") || status.contains("Abbruch") || status.contains("fehlgeschlagen")) {
-                        color = Color.parseColor("#FF6961"); shortStatus = "Fehler";
-                        if (typingMessage != null) {
-                            chatAdapter.removeMessage(typingMessage);
-                            typingMessage = null;
-                        }
-                    } else if (status.contains("gekoppelt werden") || status.contains("⏳")) {
-                        color = Color.parseColor("#FFB347"); shortStatus = "Pairing nötig";
-                    }
-                    updateStatusUI(color, shortStatus);
-                });
             }
         });
 
@@ -202,13 +174,83 @@ public class EchoFragment extends Fragment {
             }
         });
 
-        openClawClient.connect();
+        // Hintergrunddienst starten (falls er nicht schon läuft)
+        Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
+        ContextCompat.startForegroundService(requireContext(), serviceIntent);
+
         return view;
+    }
+
+    private void handleStatusUpdate(String status) {
+        int color = Color.parseColor("#FFB347");
+        String shortStatus = "Verbinde...";
+        if (status.contains("erfolgreich") || status.contains("✅")) {
+            color = Color.parseColor("#77DD77"); shortStatus = "Verbunden";
+        } else if (status.contains("Fehler") || status.contains("❌") || status.contains("Abbruch") || status.contains("fehlgeschlagen")) {
+            color = Color.parseColor("#FF6961"); shortStatus = "Fehler";
+            if (typingMessage != null) {
+                chatAdapter.removeMessage(typingMessage);
+                typingMessage = null;
+            }
+        } else if (status.contains("gekoppelt werden") || status.contains("⏳")) {
+            color = Color.parseColor("#FFB347"); shortStatus = "Pairing nötig";
+        }
+        updateStatusUI(color, shortStatus);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        requireContext().getSharedPreferences("chat_state", Context.MODE_PRIVATE)
+                .edit().putBoolean("is_echo_visible", true).apply();
+
+        IntentFilter filter = new IntentFilter();
+        filter.addAction("com.example.unicontrol.ECHO_NEW_MESSAGE");
+        filter.addAction("com.example.unicontrol.ECHO_TYPING");
+        filter.addAction("com.example.unicontrol.ECHO_STATUS");
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requireContext().registerReceiver(echoReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            requireContext().registerReceiver(echoReceiver, filter);
+        }
+
+        loadChatHistory();
+
+        // NEU: Dienst aktiv nach dem Status fragen!
+        Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
+        serviceIntent.setAction("REQUEST_STATUS");
+        requireContext().startService(serviceIntent);
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        requireContext().getSharedPreferences("chat_state", Context.MODE_PRIVATE)
+                .edit().putBoolean("is_echo_visible", false).apply();
+
+        requireContext().unregisterReceiver(echoReceiver);
+    }
+
+    private void sendMessage(String text) {
+        ChatMessage newMsg = new ChatMessage(text, true, false, pendingUriString, pendingMimeType);
+        chatAdapter.addMessage(newMsg);
+        chatRecyclerView.scrollToPosition(chatAdapter.getItemCount() - 1);
+        saveChatHistory();
+
+        Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
+        serviceIntent.setAction("SEND_MESSAGE");
+        serviceIntent.putExtra("text", text);
+        serviceIntent.putExtra("base64", pendingBase64);
+        serviceIntent.putExtra("mimeType", pendingMimeType);
+        requireContext().startService(serviceIntent);
+
+        messageEditText.setText("");
+        clearPendingAttachment();
     }
 
     private void processSelectedFile(Uri uri) {
         if (getContext() == null) return;
-
         String scheme = uri.getScheme();
         ContentResolver resolver = getContext().getContentResolver();
 
@@ -222,13 +264,10 @@ public class EchoFragment extends Fragment {
         new Thread(() -> {
             try {
                 InputStream is;
-
-                // Netzwerk-Download falls das Bild aus der Cloud kommt (z.B. Immich URL)
                 if ("http".equals(scheme) || "https".equals(scheme)) {
                     OkHttpClient httpClient = new OkHttpClient();
                     Request.Builder reqBuilder = new Request.Builder().url(uri.toString());
 
-                    // Immich API-Key anhängen, sonst wird der Download blockiert (401/403)
                     SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
                     String apiKey = prefs.getString(SettingsFragment.KEY_FOTOS_API_KEY, "");
                     if (!apiKey.isEmpty()) {
@@ -236,19 +275,13 @@ public class EchoFragment extends Fragment {
                         reqBuilder.addHeader("Accept", "application/json");
                     }
 
-                    Request req = reqBuilder.build();
-                    Response resp = httpClient.newCall(req).execute();
-
-                    if (!resp.isSuccessful() || resp.body() == null) {
-                        throw new Exception("HTTP Download Fehler: Code " + resp.code());
-                    }
+                    Response resp = httpClient.newCall(reqBuilder.build()).execute();
+                    if (!resp.isSuccessful() || resp.body() == null) throw new Exception("HTTP Download Fehler");
 
                     String contentType = resp.header("Content-Type");
                     if (contentType != null) pendingMimeType = contentType;
-
                     is = resp.body().byteStream();
                 } else {
-                    // Lokale Datei vom Gerät
                     is = resolver.openInputStream(uri);
                 }
 
@@ -262,8 +295,7 @@ public class EchoFragment extends Fragment {
                 if (pendingMimeType.startsWith("image/")) {
                     Bitmap original = BitmapFactory.decodeStream(is);
                     is.close();
-
-                    if (original == null) throw new Exception("Bild konnte nicht dekodiert werden.");
+                    if (original == null) throw new Exception("Bild fehlerhaft");
 
                     int maxDim = 1200;
                     int w = original.getWidth();
@@ -278,10 +310,8 @@ public class EchoFragment extends Fragment {
 
                     finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, fos);
                     finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, buffer);
-
                     pendingMimeType = "image/jpeg";
-                }
-                else {
+                } else {
                     int nRead;
                     byte[] data = new byte[16384];
                     while ((nRead = is.read(data, 0, data.length)) != -1) {
@@ -306,12 +336,11 @@ public class EchoFragment extends Fragment {
                         attachmentPreviewImage.setImageDrawable(null);
                         attachmentPreviewImage.setBackgroundColor(Color.GRAY);
                     }
-                    attachButton.setColorFilter(Color.parseColor("#77DD77")); // Grün
+                    attachButton.setColorFilter(Color.parseColor("#77DD77"));
                 });
             } catch (Exception e) {
-                e.printStackTrace();
                 mainHandler.post(() -> {
-                    Toast.makeText(getContext(), "Fehler beim Laden (Netzwerk?)", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), "Fehler beim Laden der Datei.", Toast.LENGTH_SHORT).show();
                     clearPendingAttachment();
                 });
             }
@@ -354,8 +383,7 @@ public class EchoFragment extends Fragment {
                     sendIntent.setAction(Intent.ACTION_SEND);
                     sendIntent.putExtra(Intent.EXTRA_TEXT, message.getText());
                     sendIntent.setType("text/plain");
-                    Intent shareIntent = Intent.createChooser(sendIntent, "Weiterleiten an...");
-                    startActivity(shareIntent);
+                    startActivity(Intent.createChooser(sendIntent, "Weiterleiten an..."));
                     return true;
             }
             return false;
@@ -371,24 +399,6 @@ public class EchoFragment extends Fragment {
         statusText.setText(text);
     }
 
-    private void sendMessage(String text) {
-        ChatMessage newMsg = new ChatMessage(text, true, false, pendingUriString, pendingMimeType);
-        addMessageToUI(newMsg);
-
-        openClawClient.sendChatMessage(text, pendingBase64, pendingMimeType);
-
-        messageEditText.setText("");
-        clearPendingAttachment();
-    }
-
-    private void addMessageToUI(ChatMessage message) {
-        chatAdapter.addMessage(message);
-        chatRecyclerView.scrollToPosition(chatAdapter.getItemCount() - 1);
-        if (!message.isSystem() && !message.isTypingIndicator()) {
-            saveChatHistory();
-        }
-    }
-
     private void saveChatHistory() {
         if (getContext() == null) return;
         SharedPreferences prefs = getContext().getSharedPreferences(PREF_CHAT_HISTORY, Context.MODE_PRIVATE);
@@ -398,8 +408,7 @@ public class EchoFragment extends Fragment {
                 toSave.add(msg);
             }
         }
-        String json = gson.toJson(toSave);
-        prefs.edit().putString(KEY_MESSAGES, json).apply();
+        prefs.edit().putString(KEY_MESSAGES, gson.toJson(toSave)).apply();
     }
 
     private void loadChatHistory() {
@@ -413,14 +422,6 @@ public class EchoFragment extends Fragment {
                 chatAdapter.setMessages(savedMessages);
                 chatRecyclerView.scrollToPosition(chatAdapter.getItemCount() - 1);
             }
-        }
-    }
-
-    @Override
-    public void onDestroyView() {
-        super.onDestroyView();
-        if (openClawClient != null) {
-            openClawClient.disconnect();
         }
     }
 }

@@ -60,13 +60,14 @@ public class MainActivity extends AppCompatActivity {
     private int currentColor;
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 1001;
 
-    final Fragment echoFragment = new EchoFragment();
-    final Fragment webUiFragment = new WebUiFragment();
-    final Fragment homeFragment = new HomeFragment();
-    final Fragment fotosFragment = new FotosFragment();
-    final Fragment settingsFragment = new SettingsFragment();
-    final FragmentManager fm = getSupportFragmentManager();
-    Fragment activeFragment = homeFragment;
+    // KORREKTUR 1: Das 'final' und 'new' wurde entfernt!
+    private Fragment echoFragment;
+    private Fragment webUiFragment;
+    private Fragment homeFragment;
+    private Fragment fotosFragment;
+    private Fragment settingsFragment;
+    private final FragmentManager fm = getSupportFragmentManager();
+    private Fragment activeFragment;
 
     private ObjectAnimator uploadAnimator;
 
@@ -98,14 +99,37 @@ public class MainActivity extends AppCompatActivity {
 
         updateBottomNavColors(bottomNav, currentColor);
 
+        // KORREKTUR 2: Nur beim "Kaltstart" neue Fragmente erstellen!
         if (savedInstanceState == null) {
+            echoFragment = new EchoFragment();
+            webUiFragment = new WebUiFragment();
+            homeFragment = new HomeFragment();
+            fotosFragment = new FotosFragment();
+            settingsFragment = new SettingsFragment();
+
             fm.beginTransaction().add(R.id.fragment_container, settingsFragment, "5").hide(settingsFragment).commit();
             fm.beginTransaction().add(R.id.fragment_container, fotosFragment, "4").hide(fotosFragment).commit();
             fm.beginTransaction().add(R.id.fragment_container, webUiFragment, "3").hide(webUiFragment).commit();
             fm.beginTransaction().add(R.id.fragment_container, echoFragment, "1").hide(echoFragment).commit();
             fm.beginTransaction().add(R.id.fragment_container, homeFragment, "2").commit();
 
+            activeFragment = homeFragment;
             bottomNav.setSelectedItemId(R.id.nav_home);
+        } else {
+            // Android hat die App aus dem Hintergrund geholt und die alten Fragmente wiederhergestellt.
+            // Wir müssen sie uns anhand der Tags (1,2,3,4,5) greifen!
+            echoFragment = fm.findFragmentByTag("1");
+            homeFragment = fm.findFragmentByTag("2");
+            webUiFragment = fm.findFragmentByTag("3");
+            fotosFragment = fm.findFragmentByTag("4");
+            settingsFragment = fm.findFragmentByTag("5");
+
+            // Herausfinden, welches Fragment vor dem App-Kill sichtbar war
+            if (echoFragment != null && !echoFragment.isHidden()) activeFragment = echoFragment;
+            else if (webUiFragment != null && !webUiFragment.isHidden()) activeFragment = webUiFragment;
+            else if (fotosFragment != null && !fotosFragment.isHidden()) activeFragment = fotosFragment;
+            else if (settingsFragment != null && !settingsFragment.isHidden()) activeFragment = settingsFragment;
+            else activeFragment = homeFragment;
         }
 
         bottomNav.setOnItemSelectedListener(item -> {
@@ -130,7 +154,7 @@ public class MainActivity extends AppCompatActivity {
                 targetColor = getDynamicColor(SettingsFragment.KEY_COLOR_SETTINGS, "#EAEAEA");
             }
 
-            if (newFragment != activeFragment) {
+            if (newFragment != null && newFragment != activeFragment) {
                 fm.beginTransaction().hide(activeFragment).show(newFragment).commit();
                 animateMenuColor(bottomNav, currentColor, targetColor);
                 currentColor = targetColor;
@@ -188,6 +212,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         handleNfcIntent(getIntent());
+
+        checkNavigationIntent(getIntent());
     }
 
     @Override
@@ -211,6 +237,21 @@ public class MainActivity extends AppCompatActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleNfcIntent(intent);
+        checkNavigationIntent(intent);
+    }
+
+    private void checkNavigationIntent(Intent intent) {
+        if (intent != null) {
+            String targetFragment = intent.getStringExtra("open_fragment");
+            if ("echo".equals(targetFragment)) {
+                BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
+                if (bottomNav != null) {
+                    bottomNav.setSelectedItemId(R.id.nav_echo);
+                }
+                // KORREKTUR 3: Das 'Extra' entfernen, damit Bildschirmdrehungen den Intent nicht nochmal feuern
+                intent.removeExtra("open_fragment");
+            }
+        }
     }
 
     private void handleNfcIntent(Intent intent) {
@@ -236,7 +277,6 @@ public class MainActivity extends AppCompatActivity {
                 String tagId = bytesToHex(tag.getId());
                 String haTagId = extractHaTagIdFromNdef(intent);
 
-                // Wenn ein formatierter Tag gefunden wird, nutze dessen HA-ID anstatt der Hardware-ID
                 if (haTagId != null && !haTagId.isEmpty()) {
                     tagId = haTagId;
                     Toast.makeText(this, "HA-Tag erkannt!\nID: " + tagId + "\nSende an Home Assistant...", Toast.LENGTH_LONG).show();
@@ -256,7 +296,6 @@ public class MainActivity extends AppCompatActivity {
             Ndef ndef = Ndef.get(tag);
 
             if (ndef == null) {
-                // Versuche den Tag neu zu formatieren, falls er komplett leer ist
                 NdefFormatable formatable = NdefFormatable.get(tag);
                 if (formatable != null) {
                     formatable.connect();
@@ -287,13 +326,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private NdefMessage createNdefMessage(String tagId) {
-        // 1. Record: Die originale Home Assistant URL, damit Home Assistant den Tag im System erkennt
         String url = "https://www.home-assistant.io/tag/" + tagId;
         NdefRecord uriRecord = NdefRecord.createUri(url);
-
-        // 2. Record: Der AAR zwingt das Android-System, UniControl zu öffnen (statt den Play Store für die offizielle HA App)
         NdefRecord aarRecord = NdefRecord.createApplicationRecord(getPackageName());
-
         return new NdefMessage(new NdefRecord[]{uriRecord, aarRecord});
     }
 
@@ -305,7 +340,7 @@ public class MainActivity extends AppCompatActivity {
                 for (NdefRecord record : msg.getRecords()) {
                     Uri uri = record.toUri();
                     if (uri != null && uri.toString().startsWith("https://www.home-assistant.io/tag/")) {
-                        return uri.getLastPathSegment(); // Extrahiert exakt die HA Tag-UUID
+                        return uri.getLastPathSegment();
                     }
                 }
             }
