@@ -66,6 +66,13 @@ import java.util.concurrent.TimeUnit;
 public class SettingsFragment extends Fragment {
 
     public static final String PREFS_NAME = "UniControlPrefs";
+
+    // --- NEU: Keys für das Ein- und Ausblenden der Module ---
+    public static final String KEY_MOD_HOME = "mod_home_enabled";
+    public static final String KEY_MOD_FOTOS = "mod_fotos_enabled";
+    public static final String KEY_MOD_ECHO = "mod_echo_enabled";
+    public static final String KEY_MOD_WEB = "mod_web_enabled";
+
     public static final String KEY_WIFI_SSID = "wifi_ssid";
     public static final String KEY_ECHO_LOCAL = "echo_local";
     public static final String KEY_ECHO_PUBLIC = "echo_public";
@@ -127,6 +134,13 @@ public class SettingsFragment extends Fragment {
         SharedPreferences prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
 
         // --- BINDING DER UI ELEMENTE ---
+
+        // NEU: Modul-Schalter binden
+        SwitchCompat switchModHome = view.findViewById(R.id.switch_mod_home);
+        SwitchCompat switchModFotos = view.findViewById(R.id.switch_mod_fotos);
+        SwitchCompat switchModEcho = view.findViewById(R.id.switch_mod_echo);
+        SwitchCompat switchModWeb = view.findViewById(R.id.switch_mod_web);
+
         EditText etSsid = view.findViewById(R.id.et_home_ssid);
         EditText etEchoLocal = view.findViewById(R.id.et_echo_local);
         EditText etEchoPublic = view.findViewById(R.id.et_echo_public);
@@ -156,7 +170,14 @@ public class SettingsFragment extends Fragment {
         MaterialButton btnOpenBackup = view.findViewById(R.id.btn_open_backup_settings);
         MaterialButton btnSaveAll = view.findViewById(R.id.btn_save_all);
 
-        // Werte aus SharedPreferences laden
+        // --- WERTE AUS SHAREDPREFERENCES LADEN ---
+
+        // NEU: Modul-Werte laden (Standardmäßig sind alle aktiv -> true)
+        if (switchModHome != null) switchModHome.setChecked(prefs.getBoolean(KEY_MOD_HOME, true));
+        if (switchModFotos != null) switchModFotos.setChecked(prefs.getBoolean(KEY_MOD_FOTOS, true));
+        if (switchModEcho != null) switchModEcho.setChecked(prefs.getBoolean(KEY_MOD_ECHO, true));
+        if (switchModWeb != null) switchModWeb.setChecked(prefs.getBoolean(KEY_MOD_WEB, true));
+
         etSsid.setText(prefs.getString(KEY_WIFI_SSID, ""));
         etEchoLocal.setText(prefs.getString(KEY_ECHO_LOCAL, ""));
         etEchoPublic.setText(prefs.getString(KEY_ECHO_PUBLIC, ""));
@@ -222,6 +243,13 @@ public class SettingsFragment extends Fragment {
         // ALLES SPEICHERN
         btnSaveAll.setOnClickListener(v -> {
             SharedPreferences.Editor editor = prefs.edit();
+
+            // NEU: Modul-Sichtbarkeiten sicher speichern
+            if (switchModHome != null) editor.putBoolean(KEY_MOD_HOME, switchModHome.isChecked());
+            if (switchModFotos != null) editor.putBoolean(KEY_MOD_FOTOS, switchModFotos.isChecked());
+            if (switchModEcho != null) editor.putBoolean(KEY_MOD_ECHO, switchModEcho.isChecked());
+            if (switchModWeb != null) editor.putBoolean(KEY_MOD_WEB, switchModWeb.isChecked());
+
             editor.putString(KEY_WIFI_SSID, etSsid.getText().toString().trim());
             editor.putString(KEY_ECHO_LOCAL, etEchoLocal.getText().toString().trim());
             editor.putString(KEY_ECHO_PUBLIC, etEchoPublic.getText().toString().trim());
@@ -239,7 +267,7 @@ public class SettingsFragment extends Fragment {
             editor.putString(KEY_FOTOS_PUBLIC, etFotosPublic.getText().toString().trim());
             editor.putString(KEY_FOTOS_API_KEY, etFotosApiKey.getText().toString().trim());
 
-            // NEU: Device ID und Crypto Keys werden zentral in CryptoUtils gespeichert!
+            // Device ID und Crypto Keys in CryptoUtils speichern
             if (etDeviceId != null && etPrivateKey != null && etPublicKey != null) {
                 String newDevId = etDeviceId.getText().toString().trim();
                 String newPriv = etPrivateKey.getText().toString().trim();
@@ -271,10 +299,14 @@ public class SettingsFragment extends Fragment {
 
             Toast.makeText(getContext(), "Einstellungen & Identität gespeichert! ✅", Toast.LENGTH_SHORT).show();
 
-            // KORREKTUR: Den harten Neustart (recreate) entfernen!
-            // Stattdessen einfach die Hintergrundfarbe des aktuellen Fensters live anpassen.
+            // Hintergrundfarbe der UI sofort live anpassen
             if (getView() != null) {
                 getView().setBackgroundColor(getThemeColor());
+            }
+
+            // NEU: Menüleiste in der MainActivity live aktualisieren, ohne Neustart!
+            if (getActivity() instanceof com.example.unicontrol.MainActivity) {
+                ((com.example.unicontrol.MainActivity) getActivity()).refreshMenu();
             }
         });
     }

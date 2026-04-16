@@ -24,6 +24,75 @@
             android:layout_marginBottom="24dp"
             android:layout_marginTop="16dp"/>
 
+        <!-- NEU: CARD 0: Module ein/ausschalten -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="20dp"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="24dp"
+            app:cardBackgroundColor="#FFFFFF">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🧩 Aktive Module"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="16dp"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switch_mod_home"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🏠 Home Assistant"
+                    android:textColor="#333333"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="16dp"
+                    app:thumbTint="#B2D3C2"
+                    app:trackTint="#D0D0D0"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switch_mod_fotos"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="☁️ Immich Fotos"
+                    android:textColor="#333333"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="16dp"
+                    app:thumbTint="#F49AC2"
+                    app:trackTint="#D0D0D0"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switch_mod_echo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="💬 OpenClaw Echo"
+                    android:textColor="#333333"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="16dp"
+                    app:thumbTint="#AEC6CF"
+                    app:trackTint="#D0D0D0"/>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switch_mod_web"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🌐 Web UI"
+                    android:textColor="#333333"
+                    android:textStyle="bold"
+                    app:thumbTint="#FDFD96"
+                    app:trackTint="#D0D0D0"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- CARD 1: Home Assistant -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"

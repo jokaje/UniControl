@@ -60,7 +60,6 @@ public class MainActivity extends AppCompatActivity {
     private int currentColor;
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 1001;
 
-    // KORREKTUR 1: Das 'final' und 'new' wurde entfernt!
     private Fragment echoFragment;
     private Fragment webUiFragment;
     private Fragment homeFragment;
@@ -74,7 +73,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean isManualBackupRunning = false;
     private boolean isAutoBackupRunning = false;
 
-    // NFC Variablen
     private NfcAdapter nfcAdapter;
     private PendingIntent pendingIntent;
 
@@ -93,13 +91,12 @@ public class MainActivity extends AppCompatActivity {
 
         BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
 
-        currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_HOME, "#B2D3C2");
-        bottomNav.setBackgroundColor(currentColor);
-        bottomNav.setBackgroundTintList(null);
+        SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, MODE_PRIVATE);
+        boolean modHome = prefs.getBoolean(SettingsFragment.KEY_MOD_HOME, true);
+        boolean modFotos = prefs.getBoolean(SettingsFragment.KEY_MOD_FOTOS, true);
+        boolean modEcho = prefs.getBoolean(SettingsFragment.KEY_MOD_ECHO, true);
+        boolean modWeb = prefs.getBoolean(SettingsFragment.KEY_MOD_WEB, true);
 
-        updateBottomNavColors(bottomNav, currentColor);
-
-        // KORREKTUR 2: Nur beim "Kaltstart" neue Fragmente erstellen!
         if (savedInstanceState == null) {
             echoFragment = new EchoFragment();
             webUiFragment = new WebUiFragment();
@@ -111,26 +108,50 @@ public class MainActivity extends AppCompatActivity {
             fm.beginTransaction().add(R.id.fragment_container, fotosFragment, "4").hide(fotosFragment).commit();
             fm.beginTransaction().add(R.id.fragment_container, webUiFragment, "3").hide(webUiFragment).commit();
             fm.beginTransaction().add(R.id.fragment_container, echoFragment, "1").hide(echoFragment).commit();
-            fm.beginTransaction().add(R.id.fragment_container, homeFragment, "2").commit();
+            fm.beginTransaction().add(R.id.fragment_container, homeFragment, "2").hide(homeFragment).commit();
 
-            activeFragment = homeFragment;
-            bottomNav.setSelectedItemId(R.id.nav_home);
+            // Intelligenter Start: Wähle das erste Modul, das aktiviert ist!
+            int startId = R.id.nav_settings;
+            Fragment startFrag = settingsFragment;
+            currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_SETTINGS, "#EAEAEA");
+
+            if (modHome) { startId = R.id.nav_home; startFrag = homeFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_HOME, "#B2D3C2"); }
+            else if (modFotos) { startId = R.id.nav_fotos; startFrag = fotosFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2"); }
+            else if (modEcho) { startId = R.id.nav_echo; startFrag = echoFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF"); }
+            else if (modWeb) { startId = R.id.nav_web; startFrag = webUiFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_WEB, "#FDFD96"); }
+
+            fm.beginTransaction().show(startFrag).commit();
+            activeFragment = startFrag;
+
+            // Menü updaten bevor wir was auswählen
+            refreshMenu();
+            bottomNav.setSelectedItemId(startId);
+
         } else {
-            // Android hat die App aus dem Hintergrund geholt und die alten Fragmente wiederhergestellt.
-            // Wir müssen sie uns anhand der Tags (1,2,3,4,5) greifen!
             echoFragment = fm.findFragmentByTag("1");
             homeFragment = fm.findFragmentByTag("2");
             webUiFragment = fm.findFragmentByTag("3");
             fotosFragment = fm.findFragmentByTag("4");
             settingsFragment = fm.findFragmentByTag("5");
 
-            // Herausfinden, welches Fragment vor dem App-Kill sichtbar war
             if (echoFragment != null && !echoFragment.isHidden()) activeFragment = echoFragment;
             else if (webUiFragment != null && !webUiFragment.isHidden()) activeFragment = webUiFragment;
             else if (fotosFragment != null && !fotosFragment.isHidden()) activeFragment = fotosFragment;
             else if (settingsFragment != null && !settingsFragment.isHidden()) activeFragment = settingsFragment;
             else activeFragment = homeFragment;
+
+            currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_SETTINGS, "#EAEAEA"); // Fallback
+            if (activeFragment == homeFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_HOME, "#B2D3C2");
+            else if (activeFragment == fotosFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2");
+            else if (activeFragment == echoFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF");
+            else if (activeFragment == webUiFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_WEB, "#FDFD96");
+
+            refreshMenu();
         }
+
+        bottomNav.setBackgroundColor(currentColor);
+        bottomNav.setBackgroundTintList(null);
+        updateBottomNavColors(bottomNav, currentColor);
 
         bottomNav.setOnItemSelectedListener(item -> {
             int itemId = item.getItemId();
@@ -200,7 +221,6 @@ public class MainActivity extends AppCompatActivity {
                     updateAnimationState();
                 });
 
-        // NFC Initialisierung
         nfcAdapter = NfcAdapter.getDefaultAdapter(this);
         if (nfcAdapter != null) {
             Intent nfcIntent = new Intent(this, getClass()).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -212,8 +232,29 @@ public class MainActivity extends AppCompatActivity {
         }
 
         handleNfcIntent(getIntent());
-
         checkNavigationIntent(getIntent());
+    }
+
+    // --- NEU: Dynamische Anpassung der Menüleiste ---
+    public void refreshMenu() {
+        SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, MODE_PRIVATE);
+        boolean modHome = prefs.getBoolean(SettingsFragment.KEY_MOD_HOME, true);
+        boolean modFotos = prefs.getBoolean(SettingsFragment.KEY_MOD_FOTOS, true);
+        boolean modEcho = prefs.getBoolean(SettingsFragment.KEY_MOD_ECHO, true);
+        boolean modWeb = prefs.getBoolean(SettingsFragment.KEY_MOD_WEB, true);
+
+        BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
+        if (bottomNav != null) {
+            // Erstmal alles leeren und standardmäßig füllen (falls wir Module wieder einschalten)
+            bottomNav.getMenu().clear();
+            bottomNav.inflateMenu(R.menu.bottom_nav_menu);
+
+            // Nicht gewollte Module aus der Leiste werfen
+            if (!modHome) bottomNav.getMenu().removeItem(R.id.nav_home);
+            if (!modFotos) bottomNav.getMenu().removeItem(R.id.nav_fotos);
+            if (!modEcho) bottomNav.getMenu().removeItem(R.id.nav_echo);
+            if (!modWeb) bottomNav.getMenu().removeItem(R.id.nav_web);
+        }
     }
 
     @Override
@@ -245,10 +286,9 @@ public class MainActivity extends AppCompatActivity {
             String targetFragment = intent.getStringExtra("open_fragment");
             if ("echo".equals(targetFragment)) {
                 BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
-                if (bottomNav != null) {
+                if (bottomNav != null && bottomNav.getMenu().findItem(R.id.nav_echo) != null) {
                     bottomNav.setSelectedItemId(R.id.nav_echo);
                 }
-                // KORREKTUR 3: Das 'Extra' entfernen, damit Bildschirmdrehungen den Intent nicht nochmal feuern
                 intent.removeExtra("open_fragment");
             }
         }
@@ -266,14 +306,12 @@ public class MainActivity extends AppCompatActivity {
                 SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
                 String writeId = prefs.getString("nfc_write_mode_id", null);
 
-                // --- SCHREIB-MODUS ---
                 if (writeId != null) {
                     writeNfcTag(tag, writeId);
                     prefs.edit().remove("nfc_write_mode_id").apply();
                     return;
                 }
 
-                // --- LESE-MODUS ---
                 String tagId = bytesToHex(tag.getId());
                 String haTagId = extractHaTagIdFromNdef(intent);
 
@@ -289,7 +327,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // --- NFC Tag Formatieren & Beschreiben ---
     private void writeNfcTag(Tag tag, String tagId) {
         try {
             NdefMessage ndefMessage = createNdefMessage(tagId);
