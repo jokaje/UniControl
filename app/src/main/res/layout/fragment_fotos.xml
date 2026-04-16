@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/transparent">
 
+    <!-- EBENE 1: Der normale Foto-Inhalt (Wird im Onboarding versteckt) -->
     <LinearLayout
+        android:id="@+id/layout_fotos_content"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
@@ -368,6 +371,62 @@
                 android:visibility="gone" />
         </FrameLayout>
     </LinearLayout>
+
+    <!-- EBENE 2: Setup Eingabefelder -->
+    <ScrollView
+        android:id="@+id/layout_fotos_setup"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:visibility="gone"
+        android:background="#F5F5F5"
+        android:elevation="10dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Fotos konfigurieren" android:textSize="28sp" android:textStyle="bold" android:textColor="#333333" android:layout_marginBottom="8dp" android:layout_marginTop="32dp"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Verbinde hier deine private Immich Cloud." android:textColor="#666666" android:layout_marginBottom="24dp"/>
+
+            <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="16dp" app:cardElevation="2dp" app:cardBackgroundColor="@android:color/white">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+
+                    <EditText android:id="@+id/et_setup_fotos_local" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Lokale URL (http://192...)" android:textColorHint="#888888" android:textColor="#333333" android:padding="12dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F0F0F0" android:layout_marginBottom="8dp"/>
+                    <EditText android:id="@+id/et_setup_fotos_public" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Public URL (Tailscale etc.)" android:textColorHint="#888888" android:textColor="#333333" android:padding="12dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F0F0F0" android:layout_marginBottom="8dp"/>
+                    <EditText android:id="@+id/et_setup_fotos_api_key" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Dein Immich API-Key" android:textColorHint="#888888" android:textColor="#333333" android:inputType="textPassword" android:padding="12dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F0F0F0" android:layout_marginBottom="24dp"/>
+
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btn_fotos_setup_save" android:layout_width="match_parent" android:layout_height="60dp" android:text="Speichern &amp; Weiter ➡️" android:textColor="@android:color/white" app:backgroundTint="#F49AC2" app:cornerRadius="30dp"/>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+            <View android:layout_width="match_parent" android:layout_height="60dp"/>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- EBENE 3: Abgedunkeltes Overlay (Sprechblase) -->
+    <FrameLayout
+        android:id="@+id/layout_fotos_intro_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#B3000000"
+        android:visibility="gone"
+        android:padding="24dp"
+        android:elevation="20dp">
+
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="center" app:cardCornerRadius="24dp" app:cardElevation="8dp" app:cardBackgroundColor="@android:color/white">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="24dp" android:gravity="center">
+
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="☁️" android:textSize="48sp" android:layout_marginBottom="16dp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Deine Fotos" android:textSize="24sp" android:textStyle="bold" android:textColor="#333333" android:layout_marginBottom="12dp"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Hier landen deine Bilder sicher auf deinem eigenen Server. Gib kurz deine URL und den Key ein." android:textColor="#555555" android:textSize="16sp" android:textAlignment="center" android:layout_marginBottom="32dp"/>
+
+                <com.google.android.material.button.MaterialButton android:id="@+id/btn_fotos_intro_next" android:layout_width="match_parent" android:layout_height="56dp" android:text="Einrichten ➡️" android:textColor="@android:color/white" app:backgroundTint="#F49AC2" app:cornerRadius="28dp" android:layout_marginBottom="12dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btn_fotos_intro_skip" android:layout_width="match_parent" android:layout_height="56dp" android:text="Nicht benötigt (Ausblenden)" android:textColor="#888888" app:backgroundTint="@android:color/transparent" app:strokeColor="#DDDDDD" app:strokeWidth="1dp" app:cornerRadius="28dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+    </FrameLayout>
 
     <!-- Unten: Auswahl-Leiste (Mehrfachauswahl) -->
     <LinearLayout

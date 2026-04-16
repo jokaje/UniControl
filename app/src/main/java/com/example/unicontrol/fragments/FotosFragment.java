@@ -130,6 +130,12 @@ public class FotosFragment extends Fragment {
 
     private TextView tvPlaceholder;
 
+    // --- NEU: Onboarding UI Elemente ---
+    private View layoutFotosContent;
+    private View layoutFotosSetup;
+    private View layoutFotosIntroOverlay;
+    // -----------------------------------
+
     private CoordinatorLayout fullscreenOverlay;
     private ViewPager2 viewPagerFullscreen;
     private TextView btnCloseFullscreen;
@@ -253,6 +259,12 @@ public class FotosFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
 
         view.setBackgroundColor(getThemeColor());
+
+        // --- NEU: Layer Binding ---
+        layoutFotosContent = view.findViewById(R.id.layout_fotos_content);
+        layoutFotosSetup = view.findViewById(R.id.layout_fotos_setup);
+        layoutFotosIntroOverlay = view.findViewById(R.id.layout_fotos_intro_overlay);
+        // --------------------------
 
         if (getActivity() != null && getActivity().getWindow() != null) {
             WindowInsetsControllerCompat windowInsetsController = new WindowInsetsControllerCompat(getActivity().getWindow(), view);
@@ -3904,6 +3916,66 @@ public class FotosFragment extends Fragment {
         String localUrl = prefs.getString(SettingsFragment.KEY_FOTOS_LOCAL, "");
         String publicUrl = prefs.getString(SettingsFragment.KEY_FOTOS_PUBLIC, "");
         String apiKey = prefs.getString(SettingsFragment.KEY_FOTOS_API_KEY, "");
+
+        // --- NEU: Onboarding Logik für Fotos ---
+        if (localUrl.isEmpty() || apiKey.isEmpty()) {
+            if (layoutFotosContent != null) layoutFotosContent.setVisibility(View.GONE);
+            if (layoutFotosSetup != null) layoutFotosSetup.setVisibility(View.VISIBLE);
+            if (layoutFotosIntroOverlay != null) layoutFotosIntroOverlay.setVisibility(View.VISIBLE);
+
+            if (getView() != null) {
+                EditText etSetupLocal = getView().findViewById(R.id.et_setup_fotos_local);
+                EditText etSetupPublic = getView().findViewById(R.id.et_setup_fotos_public);
+                EditText etSetupApiKey = getView().findViewById(R.id.et_setup_fotos_api_key);
+                MaterialButton btnIntroNext = getView().findViewById(R.id.btn_fotos_intro_next);
+                MaterialButton btnIntroSkip = getView().findViewById(R.id.btn_fotos_intro_skip);
+                MaterialButton btnSetupSave = getView().findViewById(R.id.btn_fotos_setup_save);
+
+                if (etSetupLocal != null) etSetupLocal.setText(localUrl);
+                if (etSetupPublic != null) etSetupPublic.setText(publicUrl);
+                if (etSetupApiKey != null) etSetupApiKey.setText(apiKey);
+
+                if (btnIntroNext != null) btnIntroNext.setOnClickListener(v -> layoutFotosIntroOverlay.setVisibility(View.GONE));
+
+                if (btnIntroSkip != null) {
+                    btnIntroSkip.setOnClickListener(v -> {
+                        prefs.edit().putBoolean(SettingsFragment.KEY_MOD_FOTOS, false).apply();
+                        Toast.makeText(getContext(), "Fotos-Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
+                        if (getActivity() instanceof com.example.unicontrol.MainActivity) {
+                            ((com.example.unicontrol.MainActivity) getActivity()).refreshMenu();
+                            ((com.example.unicontrol.MainActivity) getActivity()).goToNextOnboardingTab(R.id.nav_fotos);
+                        }
+                    });
+                }
+
+                if (btnSetupSave != null) {
+                    btnSetupSave.setOnClickListener(v -> {
+                        prefs.edit()
+                                .putString(SettingsFragment.KEY_FOTOS_LOCAL, etSetupLocal.getText().toString().trim())
+                                .putString(SettingsFragment.KEY_FOTOS_PUBLIC, etSetupPublic.getText().toString().trim())
+                                .putString(SettingsFragment.KEY_FOTOS_API_KEY, etSetupApiKey.getText().toString().trim())
+                                .apply();
+                        Toast.makeText(getContext(), "Fotos verbunden! ✅", Toast.LENGTH_SHORT).show();
+
+                        layoutFotosSetup.setVisibility(View.GONE);
+                        if (layoutFotosContent != null) layoutFotosContent.setVisibility(View.VISIBLE);
+
+                        loadAppropriateUrlAndKey(); // Lädt jetzt die echten Daten!
+
+                        if (getActivity() instanceof com.example.unicontrol.MainActivity) {
+                            ((com.example.unicontrol.MainActivity) getActivity()).goToNextOnboardingTab(R.id.nav_fotos);
+                        }
+                    });
+                }
+            }
+            return; // Ladeversuch abbrechen, wir sind im Setup!
+        } else {
+            if (layoutFotosContent != null) layoutFotosContent.setVisibility(View.VISIBLE);
+            if (layoutFotosSetup != null) layoutFotosSetup.setVisibility(View.GONE);
+            if (layoutFotosIntroOverlay != null) layoutFotosIntroOverlay.setVisibility(View.GONE);
+        }
+        // ---------------------------------------
+
         String currentSsid = NetworkUtils.getCurrentSsid(getContext());
         String targetUrl = "";
 

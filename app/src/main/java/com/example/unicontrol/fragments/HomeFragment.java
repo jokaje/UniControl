@@ -12,16 +12,25 @@ import android.webkit.CookieManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import com.example.unicontrol.MainActivity;
 import com.example.unicontrol.R;
 import com.example.unicontrol.utils.NetworkUtils;
+import com.google.android.material.button.MaterialButton;
 
 public class HomeFragment extends Fragment {
+
+    // UI Ebenen
+    private View layoutHomeContent;
+    private View layoutHomeSetup;
+    private View layoutHomeIntroOverlay;
 
     private WebView webView;
     private TextView tvPlaceholder;
@@ -37,6 +46,11 @@ public class HomeFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+
+        // --- LAYER BINDING ---
+        layoutHomeContent = view.findViewById(R.id.layout_home_content);
+        layoutHomeSetup = view.findViewById(R.id.layout_home_setup);
+        layoutHomeIntroOverlay = view.findViewById(R.id.layout_home_intro_overlay);
 
         // Dynamische Farbe anwenden!
         SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
@@ -62,8 +76,9 @@ public class HomeFragment extends Fragment {
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState);
             currentLoadedUrl = savedInstanceState.getString("saved_url", "");
+            checkOnboarding();
         } else {
-            loadAppropriateUrl();
+            checkOnboarding();
         }
     }
 
@@ -72,7 +87,10 @@ public class HomeFragment extends Fragment {
         super.onHiddenChanged(hidden);
         if (webView != null) {
             if (hidden) webView.onPause();
-            else { webView.onResume(); loadAppropriateUrl(); }
+            else {
+                webView.onResume();
+                checkOnboarding();
+            }
         }
     }
 
@@ -87,7 +105,7 @@ public class HomeFragment extends Fragment {
         super.onResume();
         if (webView != null && !isHidden()) {
             webView.onResume();
-            loadAppropriateUrl();
+            checkOnboarding();
         }
     }
 
@@ -100,8 +118,83 @@ public class HomeFragment extends Fragment {
         }
     }
 
+    // --- NEU: Onboarding und Weiterleitungs-Logik ---
+    private void checkOnboarding() {
+        if (getContext() == null || getView() == null) return;
+
+        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+        String localUrl = prefs.getString(SettingsFragment.KEY_HOME_LOCAL, "");
+        String publicUrl = prefs.getString(SettingsFragment.KEY_HOME_PUBLIC, "");
+
+        // Wenn beide URLs leer sind, gehen wir davon aus, dass Home Assistant noch nicht eingerichtet ist
+        if (localUrl.isEmpty() && publicUrl.isEmpty()) {
+            layoutHomeContent.setVisibility(View.GONE);
+            layoutHomeSetup.setVisibility(View.VISIBLE);
+            layoutHomeIntroOverlay.setVisibility(View.VISIBLE);
+
+            EditText etSetupSsid = getView().findViewById(R.id.et_setup_home_ssid);
+            EditText etSetupLocal = getView().findViewById(R.id.et_setup_home_local);
+            EditText etSetupPublic = getView().findViewById(R.id.et_setup_home_public);
+            EditText etSetupToken = getView().findViewById(R.id.et_setup_home_token);
+            MaterialButton btnIntroNext = getView().findViewById(R.id.btn_home_intro_next);
+            MaterialButton btnIntroSkip = getView().findViewById(R.id.btn_home_intro_skip);
+            MaterialButton btnSetupSave = getView().findViewById(R.id.btn_home_setup_save);
+
+            // Vorbefüllen falls teilweise Daten vorhanden
+            if (etSetupSsid != null) etSetupSsid.setText(prefs.getString(SettingsFragment.KEY_WIFI_SSID, ""));
+            if (etSetupLocal != null) etSetupLocal.setText(localUrl);
+            if (etSetupPublic != null) etSetupPublic.setText(publicUrl);
+            if (etSetupToken != null) etSetupToken.setText(prefs.getString(SettingsFragment.KEY_HOME_TOKEN, ""));
+
+            // Klick auf "Einrichten": Blase weg, Setup zeigen
+            if (btnIntroNext != null) btnIntroNext.setOnClickListener(v -> layoutHomeIntroOverlay.setVisibility(View.GONE));
+
+            // Klick auf "Ausblenden": Modul deaktivieren & weiter
+            if (btnIntroSkip != null) {
+                btnIntroSkip.setOnClickListener(v -> {
+                    prefs.edit().putBoolean(SettingsFragment.KEY_MOD_HOME, false).apply();
+                    Toast.makeText(getContext(), "Home-Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
+
+                    if (getActivity() instanceof MainActivity) {
+                        ((MainActivity) getActivity()).refreshMenu();
+                        ((MainActivity) getActivity()).goToNextOnboardingTab(R.id.nav_home);
+                    }
+                });
+            }
+
+            // Klick auf "Speichern": Daten speichern, WebView starten & weiter
+            if (btnSetupSave != null) {
+                btnSetupSave.setOnClickListener(v -> {
+                    prefs.edit()
+                            .putString(SettingsFragment.KEY_WIFI_SSID, etSetupSsid.getText().toString().trim())
+                            .putString(SettingsFragment.KEY_HOME_LOCAL, etSetupLocal.getText().toString().trim())
+                            .putString(SettingsFragment.KEY_HOME_PUBLIC, etSetupPublic.getText().toString().trim())
+                            .putString(SettingsFragment.KEY_HOME_TOKEN, etSetupToken.getText().toString().trim())
+                            .apply();
+
+                    Toast.makeText(getContext(), "Home Assistant verbunden! ✅", Toast.LENGTH_SHORT).show();
+
+                    layoutHomeSetup.setVisibility(View.GONE);
+                    layoutHomeContent.setVisibility(View.VISIBLE);
+
+                    loadAppropriateUrl(); // Jetzt wird das Dashboard geladen!
+
+                    if (getActivity() instanceof MainActivity) {
+                        ((MainActivity) getActivity()).goToNextOnboardingTab(R.id.nav_home);
+                    }
+                });
+            }
+        } else {
+            // Normaler Modus, Home Assistant ist bereits eingerichtet
+            layoutHomeContent.setVisibility(View.VISIBLE);
+            layoutHomeSetup.setVisibility(View.GONE);
+            layoutHomeIntroOverlay.setVisibility(View.GONE);
+            loadAppropriateUrl();
+        }
+    }
+
     private void loadAppropriateUrl() {
-        if (getContext() == null) return;
+        if (getContext() == null || webView == null) return;
         SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
         String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
         String localUrl = prefs.getString(SettingsFragment.KEY_HOME_LOCAL, "");

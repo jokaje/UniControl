@@ -1,26 +1,181 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/pastel_green">
+    android:background="#F5F5F5">
 
-    <!-- Die WebView füllt den kompletten Bildschirm aus -->
-    <WebView
-        android:id="@+id/webview_home"
+    <!-- EBENE 1: Der normale Inhalt (Wird im Onboarding versteckt) -->
+    <FrameLayout
+        android:id="@+id/layout_home_content"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:visibility="gone">
 
-    <!-- Ein Fallback-Text, falls keine URL in den Settings eingetragen wurde -->
-    <TextView
-        android:id="@+id/tv_home_placeholder"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:text="Bitte trage eine URL in den Einstellungen ein."
-        android:textSize="18sp"
-        android:textColor="#333333"
-        android:textAlignment="center"
-        android:padding="32dp"
-        android:visibility="gone"/>
+        <WebView
+            android:id="@+id/webview_home"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <TextView
+            android:id="@+id/tv_home_placeholder"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="Bitte trage eine URL in den Einstellungen ein."
+            android:textSize="18sp"
+            android:textColor="#888888"
+            android:textAlignment="center"
+            android:padding="32dp"
+            android:visibility="gone"/>
+    </FrameLayout>
+
+    <!-- EBENE 2: Setup Eingabefelder -->
+    <ScrollView
+        android:id="@+id/layout_home_setup"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:visibility="gone"
+        android:background="#F5F5F5"
+        android:elevation="10dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Smart Home"
+                android:textSize="28sp"
+                android:textStyle="bold"
+                android:textColor="#333333"
+                android:layout_marginBottom="8dp"
+                android:layout_marginTop="32dp"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Verbinde dein lokales Home Assistant Dashboard."
+                android:textColor="#666666"
+                android:layout_marginBottom="24dp"/>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="2dp"
+                app:cardBackgroundColor="@android:color/white">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Netzwerk &amp; URLs" android:textStyle="bold" android:textColor="#333333" android:layout_marginBottom="8dp"/>
+
+                    <EditText android:id="@+id/et_setup_home_ssid" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Dein Heim-WLAN (SSID)" android:textColorHint="#888888" android:textColor="#333333" android:padding="12dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F0F0F0" android:layout_marginBottom="8dp"/>
+                    <EditText android:id="@+id/et_setup_home_local" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Lokale URL (z.B. http://192...)" android:textColorHint="#888888" android:textColor="#333333" android:padding="12dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F0F0F0" android:layout_marginBottom="8dp"/>
+                    <EditText android:id="@+id/et_setup_home_public" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Public URL (Tailscale, NabuCasa...)" android:textColorHint="#888888" android:textColor="#333333" android:padding="12dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F0F0F0" android:layout_marginBottom="16dp"/>
+
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="API &amp; NFC" android:textStyle="bold" android:textColor="#333333" android:layout_marginBottom="8dp"/>
+
+                    <EditText android:id="@+id/et_setup_home_token" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Langlebiger Zugangs-Token" android:inputType="textPassword" android:textColorHint="#888888" android:textColor="#333333" android:padding="12dp" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F0F0F0" android:layout_marginBottom="24dp"/>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_home_setup_save"
+                        android:layout_width="match_parent"
+                        android:layout_height="60dp"
+                        android:text="Speichern &amp; Weiter ➡️"
+                        android:textColor="@android:color/white"
+                        app:backgroundTint="#B2D3C2"
+                        app:cornerRadius="30dp"/>
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+            <View android:layout_width="match_parent" android:layout_height="60dp"/>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- EBENE 3: Abgedunkeltes Overlay (Sprechblase) -->
+    <FrameLayout
+        android:id="@+id/layout_home_intro_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#B3000000"
+        android:visibility="gone"
+        android:padding="24dp"
+        android:elevation="20dp">
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            app:cardCornerRadius="24dp"
+            app:cardElevation="8dp"
+            app:cardBackgroundColor="@android:color/white">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="24dp"
+                android:gravity="center">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🏠"
+                    android:textSize="48sp"
+                    android:layout_marginBottom="16dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Dein Smart Home"
+                    android:textSize="24sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Hier verbindest du dein Home Assistant.\n\nGib deine URLs und einen langlebigen Token ein, um NFC-Tags zu nutzen und dein Haus zu steuern."
+                    android:textColor="#555555"
+                    android:textSize="16sp"
+                    android:textAlignment="center"
+                    android:lineSpacingExtra="4dp"
+                    android:layout_marginBottom="32dp"/>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_home_intro_next"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:text="Einrichten ➡️"
+                    android:textColor="@android:color/white"
+                    app:backgroundTint="#B2D3C2"
+                    app:cornerRadius="28dp"
+                    android:layout_marginBottom="12dp"/>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_home_intro_skip"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:text="Nicht benötigt (Ausblenden)"
+                    android:textColor="#888888"
+                    app:backgroundTint="@android:color/transparent"
+                    app:strokeColor="#DDDDDD"
+                    app:strokeWidth="1dp"
+                    app:cornerRadius="28dp"/>
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+    </FrameLayout>
 
 </FrameLayout>

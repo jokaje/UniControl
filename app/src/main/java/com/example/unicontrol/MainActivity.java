@@ -294,6 +294,39 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // --- NEU: Der Lotse für die Onboarding-Tour ---
+    public void goToNextOnboardingTab(int currentNavId) {
+        BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
+        if (bottomNav == null) return;
+
+        // Die ideale Tour-Reihenfolge durch die App
+        int[] order = {R.id.nav_home, R.id.nav_fotos, R.id.nav_echo, R.id.nav_web, R.id.nav_settings};
+
+        int currentIndex = -1;
+        for (int i = 0; i < order.length; i++) {
+            if (order[i] == currentNavId) {
+                currentIndex = i;
+                break;
+            }
+        }
+
+        if (currentIndex != -1) {
+            // Suche den nächsten AKTIVEN Tab
+            for (int i = currentIndex + 1; i < order.length; i++) {
+                int nextId = order[i];
+                if (bottomNav.getMenu().findItem(nextId) != null) {
+                    bottomNav.setSelectedItemId(nextId);
+                    return; // Nächster Tab gefunden und gewechselt!
+                }
+            }
+        }
+        // Fallback: Wenn wir am Ende sind (Settings) oder nichts finden -> Home
+        if (bottomNav.getMenu().findItem(R.id.nav_home) != null) {
+            bottomNav.setSelectedItemId(R.id.nav_home);
+        }
+    }
+    // ------------------------------------------
+
     private void handleNfcIntent(Intent intent) {
         if (intent == null || intent.getAction() == null) return;
 

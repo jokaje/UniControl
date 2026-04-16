@@ -44,11 +44,14 @@ import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.example.unicontrol.MainActivity;
 import com.example.unicontrol.R;
 import com.example.unicontrol.adapters.ChatAdapter;
 import com.example.unicontrol.models.ChatMessage;
 import com.example.unicontrol.services.OpenClawService;
+import com.example.unicontrol.utils.CryptoUtils;
 import com.example.unicontrol.viewmodels.SharedViewModel;
+import com.google.android.material.button.MaterialButton;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
@@ -70,6 +73,11 @@ public class EchoFragment extends Fragment {
     private static final String PREF_CHAT_HISTORY = "chat_history_prefs";
     private static final String KEY_MESSAGES = "chat_messages_list";
 
+    // UI Ebenen
+    private View layoutChat;
+    private View layoutSetup;
+    private View layoutIntroOverlay;
+
     private RecyclerView chatRecyclerView;
     private EditText messageEditText;
     private ImageButton sendButton;
@@ -87,6 +95,7 @@ public class EchoFragment extends Fragment {
     private Gson gson = new Gson();
 
     private int currentThemeColor;
+    private CryptoUtils cryptoUtils;
 
     private String pendingBase64 = null;
     private String pendingMimeType = null;
@@ -95,7 +104,6 @@ public class EchoFragment extends Fragment {
     private ChatMessage typingMessage = null;
     private SharedViewModel sharedViewModel;
 
-    // --- NEU: Variablen für die Audio-Aufnahme ---
     private MediaRecorder mediaRecorder;
     private String audioFilePath = null;
     private boolean isRecording = false;
@@ -140,6 +148,25 @@ public class EchoFragment extends Fragment {
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_echo, container, false);
 
+        // --- LAYER BINDING ---
+        layoutChat = view.findViewById(R.id.layout_echo_chat);
+        layoutSetup = view.findViewById(R.id.layout_echo_setup);
+        layoutIntroOverlay = view.findViewById(R.id.layout_echo_intro_overlay);
+
+        // Setup Fields
+        EditText etSetupLocal = view.findViewById(R.id.et_setup_echo_local);
+        EditText etSetupPublic = view.findViewById(R.id.et_setup_echo_public);
+        EditText etSetupPass = view.findViewById(R.id.et_setup_echo_pass);
+        EditText etSetupDevice = view.findViewById(R.id.et_setup_device_id);
+        EditText etSetupPub = view.findViewById(R.id.et_setup_pub_key);
+        EditText etSetupPriv = view.findViewById(R.id.et_setup_priv_key);
+        MaterialButton btnSetupSave = view.findViewById(R.id.btn_setup_save);
+        MaterialButton btnIntroNext = view.findViewById(R.id.btn_intro_next);
+
+        // NEU: Der Skip-Button
+        MaterialButton btnIntroSkip = view.findViewById(R.id.btn_intro_skip);
+
+        // Chat Fields
         chatRecyclerView = view.findViewById(R.id.chatRecyclerView);
         messageEditText = view.findViewById(R.id.messageEditText);
         sendButton = view.findViewById(R.id.sendButton);
@@ -157,6 +184,8 @@ public class EchoFragment extends Fragment {
         chatRecyclerView.setAdapter(chatAdapter);
 
         SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+        cryptoUtils = new CryptoUtils(requireContext());
+
         String echoColorHex = prefs.getString(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF");
         currentThemeColor = Color.parseColor("#AEC6CF");
         try { currentThemeColor = Color.parseColor(echoColorHex); } catch (Exception ignored) {}
@@ -170,6 +199,79 @@ public class EchoFragment extends Fragment {
         updateStatusUI(Color.parseColor("#FFB347"), "Warte auf Dienst...");
         loadChatHistory();
 
+        // --- ONBOARDING LOGIK ---
+        boolean hasIdentity = cryptoUtils.hasValidIdentity();
+        String localUrl = prefs.getString(SettingsFragment.KEY_ECHO_LOCAL, "");
+
+        if (!hasIdentity || localUrl.isEmpty()) {
+            // Zeige Sprechblase & Setup!
+            layoutChat.setVisibility(View.GONE);
+            layoutSetup.setVisibility(View.VISIBLE);
+            layoutIntroOverlay.setVisibility(View.VISIBLE);
+
+            // Vorbefüllen falls teilweise Daten vorhanden
+            etSetupLocal.setText(localUrl);
+            etSetupPublic.setText(prefs.getString(SettingsFragment.KEY_ECHO_PUBLIC, ""));
+            etSetupPass.setText(prefs.getString(SettingsFragment.KEY_OPENCLAW_PASSWORD, ""));
+            etSetupDevice.setText(cryptoUtils.getDeviceId());
+            etSetupPub.setText(cryptoUtils.getPublicKeyBase64());
+            etSetupPriv.setText(cryptoUtils.getPrivateKeyBase64());
+
+            Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
+            requireContext().stopService(serviceIntent);
+        } else {
+            // Normaler Chat-Modus!
+            layoutChat.setVisibility(View.VISIBLE);
+            layoutSetup.setVisibility(View.GONE);
+            layoutIntroOverlay.setVisibility(View.GONE);
+
+            Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
+            ContextCompat.startForegroundService(requireContext(), serviceIntent);
+        }
+
+        // Klick auf "Einrichten": Blendet nur die Blase aus
+        btnIntroNext.setOnClickListener(v -> layoutIntroOverlay.setVisibility(View.GONE));
+
+        // NEU: Klick auf "Nicht benötigt": Deaktiviert das Modul und geht weiter!
+        btnIntroSkip.setOnClickListener(v -> {
+            prefs.edit().putBoolean(SettingsFragment.KEY_MOD_ECHO, false).apply();
+            Toast.makeText(getContext(), "Echo-Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
+
+            if (getActivity() instanceof MainActivity) {
+                MainActivity mainActivity = (MainActivity) getActivity();
+                mainActivity.refreshMenu(); // Lässt den Tab unten magisch verschwinden!
+                mainActivity.goToNextOnboardingTab(R.id.nav_echo); // Geht zum nächsten Modul
+            }
+        });
+
+        // Klick auf "Speichern": Schließt Setup ab und geht weiter
+        btnSetupSave.setOnClickListener(v -> {
+            prefs.edit()
+                    .putString(SettingsFragment.KEY_ECHO_LOCAL, etSetupLocal.getText().toString().trim())
+                    .putString(SettingsFragment.KEY_ECHO_PUBLIC, etSetupPublic.getText().toString().trim())
+                    .putString(SettingsFragment.KEY_OPENCLAW_PASSWORD, etSetupPass.getText().toString().trim())
+                    .apply();
+
+            cryptoUtils.setIdentity(
+                    etSetupDevice.getText().toString().trim(),
+                    etSetupPriv.getText().toString().trim(),
+                    etSetupPub.getText().toString().trim()
+            );
+
+            Toast.makeText(getContext(), "Echo verbunden! ✅", Toast.LENGTH_SHORT).show();
+
+            layoutSetup.setVisibility(View.GONE);
+            layoutChat.setVisibility(View.VISIBLE);
+
+            Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
+            ContextCompat.startForegroundService(requireContext(), serviceIntent);
+
+            if (getActivity() instanceof MainActivity) {
+                ((MainActivity) getActivity()).goToNextOnboardingTab(R.id.nav_echo);
+            }
+        });
+        // -----------------------
+
         sharedViewModel = new ViewModelProvider(requireActivity()).get(SharedViewModel.class);
         sharedViewModel.getPendingImageUri().observe(getViewLifecycleOwner(), uriString -> {
             if (uriString != null && !uriString.isEmpty()) {
@@ -181,40 +283,34 @@ public class EchoFragment extends Fragment {
         if (attachButton != null) attachButton.setOnClickListener(v -> filePickerLauncher.launch("*/*"));
         if (removeAttachmentButton != null) removeAttachmentButton.setOnClickListener(v -> clearPendingAttachment());
 
-        // --- NEU: Text-Watcher für das Icon-Switching (Mic vs. Senden) ---
         messageEditText.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
-            @Override public void afterTextChanged(Editable s) {
-                updateSendButtonIcon();
-            }
+            @Override public void afterTextChanged(Editable s) { updateSendButtonIcon(); }
         });
         updateSendButtonIcon();
 
-        // --- NEU: Touch-Listener für Senden UND Aufnehmen ---
         sendButton.setOnTouchListener((v, event) -> {
             boolean hasContent = !messageEditText.getText().toString().trim().isEmpty() || pendingBase64 != null;
 
             if (hasContent) {
-                // NORMALES SENDEN (Text oder Bild)
                 if (event.getAction() == MotionEvent.ACTION_UP) {
                     sendMessage(messageEditText.getText().toString().trim());
-                    v.performClick(); // Löst den Klick-Sound vom System aus
+                    v.performClick();
                 }
                 return true;
             } else {
-                // SPRACHNACHRICHT AUFNEHMEN
                 if (event.getAction() == MotionEvent.ACTION_DOWN) {
                     if (checkAudioPermission()) {
                         startRecording();
-                        sendButton.setColorFilter(Color.parseColor("#FF6961")); // Button wird Rot
+                        sendButton.setColorFilter(Color.parseColor("#FF6961"));
                         messageEditText.setHint("🎤 Aufnahme läuft... (Loslassen zum Senden)");
                     }
                     return true;
                 } else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
                     if (isRecording) {
                         stopRecordingAndSend();
-                        sendButton.setColorFilter(currentThemeColor); // Wieder normale Farbe
+                        sendButton.setColorFilter(currentThemeColor);
                         messageEditText.setHint("Frag OpenClaw etwas...");
                     }
                     return true;
@@ -223,13 +319,9 @@ public class EchoFragment extends Fragment {
             return false;
         });
 
-        Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
-        ContextCompat.startForegroundService(requireContext(), serviceIntent);
-
         return view;
     }
 
-    // --- NEU: Hilfsmethoden für Audio ---
     private void updateSendButtonIcon() {
         if (getContext() == null || sendButton == null) return;
         boolean hasContent = !messageEditText.getText().toString().trim().isEmpty() || pendingBase64 != null;
@@ -291,14 +383,11 @@ public class EchoFragment extends Fragment {
                     byte[] fileBytes = buffer.toByteArray();
                     String base64 = Base64.encodeToString(fileBytes, Base64.NO_WRAP);
 
-                    // Lokal in die UI einfügen (wird nur als "🎤 Sprachnachricht" Text angezeigt)
-                    // (Einen echten Audio-Player können wir später jederzeit in den Adapter nachrüsten!)
                     ChatMessage newMsg = new ChatMessage("🎤 Sprachnachricht gesendet", true, false, Uri.fromFile(audioFile).toString(), "audio/mp4");
                     chatAdapter.addMessage(newMsg);
                     chatRecyclerView.scrollToPosition(chatAdapter.getItemCount() - 1);
                     saveChatHistory();
 
-                    // Datei an den Hintergrunddienst zum Senden an OpenClaw übergeben
                     Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
                     serviceIntent.setAction("SEND_MESSAGE");
                     serviceIntent.putExtra("text", "Ich habe dir eine Sprachnachricht gesendet.");
@@ -312,7 +401,6 @@ public class EchoFragment extends Fragment {
             }
         }
     }
-    // ------------------------------------
 
     private void handleStatusUpdate(String status) {
         int color = Color.parseColor("#FFB347");
@@ -345,14 +433,16 @@ public class EchoFragment extends Fragment {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requireContext().registerReceiver(echoReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
-            requireContext().registerReceiver(echoReceiver, filter);
+            ContextCompat.registerReceiver(requireContext(), echoReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
         }
 
         loadChatHistory();
 
-        Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
-        serviceIntent.setAction("REQUEST_STATUS");
-        requireContext().startService(serviceIntent);
+        if (cryptoUtils.hasValidIdentity()) {
+            Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
+            serviceIntent.setAction("REQUEST_STATUS");
+            requireContext().startService(serviceIntent);
+        }
     }
 
     @Override
@@ -469,7 +559,7 @@ public class EchoFragment extends Fragment {
                         attachmentPreviewImage.setBackgroundColor(Color.GRAY);
                     }
                     attachButton.setColorFilter(Color.parseColor("#77DD77"));
-                    updateSendButtonIcon(); // NEU: Icon aktualisieren!
+                    updateSendButtonIcon();
                 });
             } catch (Exception e) {
                 mainHandler.post(() -> {
@@ -487,7 +577,7 @@ public class EchoFragment extends Fragment {
         if (attachButton != null) attachButton.clearColorFilter();
         if (attachmentPreviewLayout != null) attachmentPreviewLayout.setVisibility(View.GONE);
         if (attachmentPreviewImage != null) attachmentPreviewImage.setImageDrawable(null);
-        updateSendButtonIcon(); // NEU: Icon aktualisieren!
+        updateSendButtonIcon();
     }
 
     private void showMessageMenu(ChatMessage message, View anchorView) {

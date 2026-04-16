@@ -12,16 +12,25 @@ import android.webkit.CookieManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import com.example.unicontrol.MainActivity;
 import com.example.unicontrol.R;
 import com.example.unicontrol.utils.NetworkUtils;
+import com.google.android.material.button.MaterialButton;
 
 public class WebUiFragment extends Fragment {
+
+    // UI Ebenen
+    private View layoutWebContent;
+    private View layoutWebSetup;
+    private View layoutWebIntroOverlay;
 
     private WebView webView;
     private TextView tvPlaceholder;
@@ -37,6 +46,11 @@ public class WebUiFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+
+        // --- LAYER BINDING ---
+        layoutWebContent = view.findViewById(R.id.layout_web_content);
+        layoutWebSetup = view.findViewById(R.id.layout_web_setup);
+        layoutWebIntroOverlay = view.findViewById(R.id.layout_web_intro_overlay);
 
         // Dynamische Farbe anwenden!
         SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
@@ -62,8 +76,9 @@ public class WebUiFragment extends Fragment {
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState);
             currentLoadedUrl = savedInstanceState.getString("saved_url", "");
+            checkOnboarding();
         } else {
-            loadAppropriateUrl();
+            checkOnboarding();
         }
     }
 
@@ -72,7 +87,10 @@ public class WebUiFragment extends Fragment {
         super.onHiddenChanged(hidden);
         if (webView != null) {
             if (hidden) webView.onPause();
-            else { webView.onResume(); loadAppropriateUrl(); }
+            else {
+                webView.onResume();
+                checkOnboarding();
+            }
         }
     }
 
@@ -87,7 +105,7 @@ public class WebUiFragment extends Fragment {
         super.onResume();
         if (webView != null && !isHidden()) {
             webView.onResume();
-            loadAppropriateUrl();
+            checkOnboarding();
         }
     }
 
@@ -100,8 +118,77 @@ public class WebUiFragment extends Fragment {
         }
     }
 
+    // --- NEU: Onboarding und Weiterleitungs-Logik ---
+    private void checkOnboarding() {
+        if (getContext() == null || getView() == null) return;
+
+        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+        String localUrl = prefs.getString(SettingsFragment.KEY_WEB_LOCAL, "");
+        String publicUrl = prefs.getString(SettingsFragment.KEY_WEB_PUBLIC, "");
+
+        // Wenn beide URLs leer sind, zeigen wir das Setup an
+        if (localUrl.isEmpty() && publicUrl.isEmpty()) {
+            layoutWebContent.setVisibility(View.GONE);
+            layoutWebSetup.setVisibility(View.VISIBLE);
+            layoutWebIntroOverlay.setVisibility(View.VISIBLE);
+
+            EditText etSetupLocal = getView().findViewById(R.id.et_setup_web_local);
+            EditText etSetupPublic = getView().findViewById(R.id.et_setup_web_public);
+            MaterialButton btnIntroNext = getView().findViewById(R.id.btn_web_intro_next);
+            MaterialButton btnIntroSkip = getView().findViewById(R.id.btn_web_intro_skip);
+            MaterialButton btnSetupSave = getView().findViewById(R.id.btn_web_setup_save);
+
+            // Vorbefüllen falls teilweise Daten vorhanden
+            if (etSetupLocal != null) etSetupLocal.setText(localUrl);
+            if (etSetupPublic != null) etSetupPublic.setText(publicUrl);
+
+            // Klick auf "Einrichten": Blase weg, Setup zeigen
+            if (btnIntroNext != null) btnIntroNext.setOnClickListener(v -> layoutWebIntroOverlay.setVisibility(View.GONE));
+
+            // Klick auf "Ausblenden": Modul deaktivieren & weiter
+            if (btnIntroSkip != null) {
+                btnIntroSkip.setOnClickListener(v -> {
+                    prefs.edit().putBoolean(SettingsFragment.KEY_MOD_WEB, false).apply();
+                    Toast.makeText(getContext(), "Web UI Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
+
+                    if (getActivity() instanceof MainActivity) {
+                        ((MainActivity) getActivity()).refreshMenu();
+                        ((MainActivity) getActivity()).goToNextOnboardingTab(R.id.nav_web);
+                    }
+                });
+            }
+
+            // Klick auf "Speichern": Daten speichern, WebView starten & weiter
+            if (btnSetupSave != null) {
+                btnSetupSave.setOnClickListener(v -> {
+                    prefs.edit()
+                            .putString(SettingsFragment.KEY_WEB_LOCAL, etSetupLocal.getText().toString().trim())
+                            .putString(SettingsFragment.KEY_WEB_PUBLIC, etSetupPublic.getText().toString().trim())
+                            .apply();
+
+                    Toast.makeText(getContext(), "Web UI verbunden! ✅", Toast.LENGTH_SHORT).show();
+
+                    layoutWebSetup.setVisibility(View.GONE);
+                    layoutWebContent.setVisibility(View.VISIBLE);
+
+                    loadAppropriateUrl(); // Jetzt wird das Dashboard geladen!
+
+                    if (getActivity() instanceof MainActivity) {
+                        ((MainActivity) getActivity()).goToNextOnboardingTab(R.id.nav_web);
+                    }
+                });
+            }
+        } else {
+            // Normaler Modus, Web UI ist bereits eingerichtet
+            layoutWebContent.setVisibility(View.VISIBLE);
+            layoutWebSetup.setVisibility(View.GONE);
+            layoutWebIntroOverlay.setVisibility(View.GONE);
+            loadAppropriateUrl();
+        }
+    }
+
     private void loadAppropriateUrl() {
-        if (getContext() == null) return;
+        if (getContext() == null || webView == null) return;
         SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
         String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
         String localUrl = prefs.getString(SettingsFragment.KEY_WEB_LOCAL, "");
@@ -109,7 +196,7 @@ public class WebUiFragment extends Fragment {
         String currentSsid = NetworkUtils.getCurrentSsid(getContext());
         String targetUrl = "";
 
-        if (!savedSsid.isEmpty() && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) {
+        if (!savedSsid.isEmpty() && currentSsid != null && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) {
             targetUrl = formatUrl(localUrl, true);
         } else if (!publicUrl.isEmpty()) {
             targetUrl = formatUrl(publicUrl, false);
