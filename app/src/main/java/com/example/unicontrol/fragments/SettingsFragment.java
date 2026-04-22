@@ -108,6 +108,7 @@ public class SettingsFragment extends Fragment {
     private static final int REQUEST_CODE_LOCATION = 1004;
 
     private CryptoUtils cryptoUtils;
+    private SwitchCompat switchTracking; // Als Klassenvariable für onRequestPermissionsResult
 
     @Nullable
     @Override
@@ -165,7 +166,7 @@ public class SettingsFragment extends Fragment {
         EditText etColorWeb = view.findViewById(R.id.et_color_web);
         EditText etColorSettings = view.findViewById(R.id.et_color_settings);
 
-        SwitchCompat switchTracking = view.findViewById(R.id.switch_tracking);
+        switchTracking = view.findViewById(R.id.switch_tracking);
         MaterialButton btnWriteNfc = view.findViewById(R.id.btn_write_nfc);
         MaterialButton btnOpenBackup = view.findViewById(R.id.btn_open_backup_settings);
         MaterialButton btnSaveAll = view.findViewById(R.id.btn_save_all);
@@ -214,17 +215,27 @@ public class SettingsFragment extends Fragment {
         setupColorPicker(etColorWeb);
         setupColorPicker(etColorSettings);
 
-        // TRACKING LOGIK
+        // TRACKING LOGIK (SOFORTIGES STARTEN / STOPPEN)
         switchTracking.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (isChecked) {
                 if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                    switchTracking.setChecked(false);
+                    switchTracking.setChecked(false); // Rechte fehlen noch, setze UI zurück
                     requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_CODE_LOCATION);
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                    switchTracking.setChecked(false);
+                    switchTracking.setChecked(false); // Rechte fehlen noch, setze UI zurück
                     Toast.makeText(getContext(), "WICHTIG: Bitte wähle gleich 'Immer zulassen' für das Hintergrund-Tracking!", Toast.LENGTH_LONG).show();
                     requestPermissions(new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}, REQUEST_CODE_LOCATION);
+                } else {
+                    // Alles berechtigt -> Direkt speichern und Tracking starten!
+                    prefs.edit().putBoolean(KEY_LOCATION_TRACKING_ENABLED, true).apply();
+                    startLocationTracking();
+                    Toast.makeText(getContext(), "Hintergrund-Tracking aktiviert! 📍", Toast.LENGTH_SHORT).show();
                 }
+            } else {
+                // Tracking deaktiviert -> Direkt speichern und stoppen!
+                prefs.edit().putBoolean(KEY_LOCATION_TRACKING_ENABLED, false).apply();
+                WorkManager.getInstance(requireContext()).cancelUniqueWork("HomeAssistantLocation");
+                Toast.makeText(getContext(), "Hintergrund-Tracking pausiert.", Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -284,18 +295,7 @@ public class SettingsFragment extends Fragment {
             editor.putString(KEY_COLOR_WEB, etColorWeb.getText().toString().trim());
             editor.putString(KEY_COLOR_SETTINGS, etColorSettings.getText().toString().trim());
 
-            boolean isTracking = switchTracking.isChecked();
-            editor.putBoolean(KEY_LOCATION_TRACKING_ENABLED, isTracking);
-
             editor.apply();
-
-            // Tracking aktivieren/deaktivieren
-            if (isTracking) {
-                PeriodicWorkRequest locationRequest = new PeriodicWorkRequest.Builder(LocationWorker.class, 15, TimeUnit.MINUTES).build();
-                WorkManager.getInstance(requireContext()).enqueueUniquePeriodicWork("HomeAssistantLocation", ExistingPeriodicWorkPolicy.UPDATE, locationRequest);
-            } else {
-                WorkManager.getInstance(requireContext()).cancelUniqueWork("HomeAssistantLocation");
-            }
 
             Toast.makeText(getContext(), "Einstellungen & Identität gespeichert! ✅", Toast.LENGTH_SHORT).show();
 
@@ -309,6 +309,11 @@ public class SettingsFragment extends Fragment {
                 ((com.example.unicontrol.MainActivity) getActivity()).refreshMenu();
             }
         });
+    }
+
+    private void startLocationTracking() {
+        PeriodicWorkRequest locationRequest = new PeriodicWorkRequest.Builder(LocationWorker.class, 15, TimeUnit.MINUTES).build();
+        WorkManager.getInstance(requireContext()).enqueueUniquePeriodicWork("HomeAssistantLocation", ExistingPeriodicWorkPolicy.UPDATE, locationRequest);
     }
 
     private void setupColorPicker(EditText editText) {
@@ -394,7 +399,10 @@ public class SettingsFragment extends Fragment {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                     Toast.makeText(getContext(), "Schritt 1 fertig! Aktiviere den Schalter erneut für die Hintergrund-Erlaubnis.", Toast.LENGTH_LONG).show();
                 } else {
-                    Toast.makeText(getContext(), "GPS-Rechte erteilt! Du kannst den Schalter nun aktivieren.", Toast.LENGTH_LONG).show();
+                    // Rechte wurden erfolgreich vergeben -> Schalter auf aktiv setzen und Worker starten!
+                    if (switchTracking != null) {
+                        switchTracking.setChecked(true);
+                    }
                 }
             } else {
                 Toast.makeText(getContext(), "Bitte wähle 'Immer zulassen', sonst klappt das Tracking im Hintergrund nicht.", Toast.LENGTH_LONG).show();

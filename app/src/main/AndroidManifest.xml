@@ -63,12 +63,23 @@
             android:noHistory="true"
             android:launchMode="singleInstance"
             android:taskAffinity=".NfcTask">
+
+            <!-- Home Assistant Web Tag Format -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.nfc.action.NDEF_DISCOVERED" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="www.home-assistant.io" android:pathPrefix="/tag/" />
             </intent-filter>
+
+            <!-- HINZUGEFÜGT: Erlaubt das Starten der App durch Plain-Text Tags (UUIDs) -->
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!-- Fallback Intents (wenn kein expliziter Typ vorhanden ist) -->
             <intent-filter>
                 <action android:name="android.nfc.action.TAG_DISCOVERED" />
                 <category android:name="android.intent.category.DEFAULT" />
