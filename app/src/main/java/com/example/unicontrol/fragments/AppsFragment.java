@@ -22,6 +22,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import com.example.unicontrol.R;
 
@@ -29,8 +30,9 @@ public class AppsFragment extends Fragment {
 
     private WebView webView;
     private ProgressBar progressBar;
+    private SwipeRefreshLayout swipeRefreshLayout;
 
-    // Die neuen Keys, die wir dann in den Settings anlegen werden
+    // Die Keys aus den Settings
     public static final String KEY_APPS_LOCAL = "apps_local";
     public static final String KEY_APPS_PUBLIC = "apps_public";
     public static final String KEY_COLOR_APPS = "color_apps";
@@ -48,6 +50,7 @@ public class AppsFragment extends Fragment {
 
         webView = view.findViewById(R.id.webview_apps);
         progressBar = view.findViewById(R.id.progressBar);
+        swipeRefreshLayout = view.findViewById(R.id.swipe_refresh); // NEU: Swipe-Layout binden
 
         // Hintergrundfarbe setzen
         SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
@@ -56,6 +59,13 @@ public class AppsFragment extends Fragment {
             view.setBackgroundColor(Color.parseColor(hexColor));
             webView.setBackgroundColor(Color.parseColor(hexColor));
         } catch (Exception ignored) {}
+
+        // NEU: Logik für das Herunterziehen (Pull-to-Refresh)
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            if (webView != null) {
+                webView.reload(); // Lade die aktuelle Seite der WebView neu
+            }
+        });
 
         // WebView Settings (Sehr wichtig für moderne Web-Apps wie dein Backend)
         WebSettings webSettings = webView.getSettings();
@@ -82,6 +92,10 @@ public class AppsFragment extends Fragment {
                     progressBar.setProgress(newProgress);
                 } else {
                     progressBar.setVisibility(View.GONE);
+                    // NEU: Wenn der Ladevorgang fertig ist, verstecken wir das runde Lade-Symbol des SwipeRefreshLayouts
+                    if (swipeRefreshLayout.isRefreshing()) {
+                        swipeRefreshLayout.setRefreshing(false);
+                    }
                 }
             }
         });
@@ -95,6 +109,10 @@ public class AppsFragment extends Fragment {
             webView.loadUrl(targetUrl);
         } else {
             Toast.makeText(getContext(), "Bitte konfiguriere zuerst die App-Entwicklung URLs in den Einstellungen.", Toast.LENGTH_LONG).show();
+            // Falls fehlerhaft beendet, Animation abbrechen
+            if (swipeRefreshLayout.isRefreshing()) {
+                swipeRefreshLayout.setRefreshing(false);
+            }
         }
     }
 

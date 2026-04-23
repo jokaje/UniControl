@@ -101,11 +101,23 @@ public class OpenClawService extends Service {
                     openClawClient.sendChatMessage(text, base64, mime);
                 }
             } else if ("REQUEST_STATUS".equals(action)) {
+                // Wenn das Fragment aufwacht, aber der Status auf Fehler steht, zwingen wir einen Connect!
+                if (currentStatus.contains("Fehler") || currentStatus.contains("fehlgeschlagen") || currentStatus.contains("getrennt") || currentStatus.contains("Warte")) {
+                    if (openClawClient != null) {
+                        openClawClient.connect();
+                    }
+                }
                 // Das Fragment hat sich geöffnet und fragt nach dem Status!
                 Intent statusIntent = new Intent("com.example.unicontrol.ECHO_STATUS");
                 statusIntent.putExtra("status", currentStatus);
                 statusIntent.setPackage(getPackageName());
                 sendBroadcast(statusIntent);
+            }
+        } else {
+            // Android hat den Service im Hintergrund neu gestartet (START_STICKY)
+            // intent ist hier null! Wir müssen die Verbindung wieder herstellen.
+            if (openClawClient != null) {
+                openClawClient.connect();
             }
         }
         return START_STICKY;

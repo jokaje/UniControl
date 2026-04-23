@@ -2,6 +2,8 @@ package com.example.unicontrol.network;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -13,6 +15,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -32,6 +35,11 @@ public class OpenClawClient extends WebSocketListener {
     private OkHttpClient client;
     private ChatListener chatListener;
 
+    // Flags und Handler für Auto-Reconnect
+    private boolean isConnecting = false;
+    private boolean manualDisconnect = false;
+    private final Handler reconnectHandler = new Handler(Looper.getMainLooper());
+
     public interface ChatListener {
         void onMessageReceived(String text);
         void onConnectionStatusChanged(String status);
@@ -46,7 +54,6 @@ public class OpenClawClient extends WebSocketListener {
         sendChatMessage(text, null, null);
     }
 
-    // --- HIER PASSIERT DIE MAGIE FÜR DIE ANHÄNGE ---
     public void sendChatMessage(String text, String base64Content, String mimeType) {
         if (webSocket != null) {
 
@@ -74,7 +81,7 @@ public class OpenClawClient extends WebSocketListener {
                 attachment.addProperty("mimeType", mimeType);
                 attachment.addProperty("content", base64Content);
 
-                // NEU: Das von ihm erwähnte, optionale fileName-Feld hinzufügen!
+                // Optionales fileName-Feld hinzufügen!
                 String ext = mimeType.contains("/") ? mimeType.split("/")[1] : "bin";
                 attachment.addProperty("fileName", "upload_" + System.currentTimeMillis() + "." + ext);
 
@@ -111,8 +118,12 @@ public class OpenClawClient extends WebSocketListener {
         this.context = context;
         this.cryptoUtils = new CryptoUtils(context);
         this.gson = new Gson();
-        this.client = new OkHttpClient();
         this.settingsPrefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+
+        // Ping-Intervall hinzugefügt (Keep-Alive für den Hintergrund, verhindert Timeout)
+        this.client = new OkHttpClient.Builder()
+                .pingInterval(30, TimeUnit.SECONDS)
+                .build();
     }
 
     private String getSmartUrl() {
@@ -150,15 +161,21 @@ public class OpenClawClient extends WebSocketListener {
     }
 
     public void connect() {
+        if (isConnecting) return;
+        manualDisconnect = false;
+        isConnecting = true;
+
         String url = getSmartUrl();
 
         if (url == null || (!url.startsWith("ws://") && !url.startsWith("wss://") && !url.startsWith("http://") && !url.startsWith("https://"))) {
             if (chatListener != null) chatListener.onConnectionStatusChanged("Fehler: Keine gültige URL (ws:// / wss://) in Einstellungen!");
+            isConnecting = false;
             return;
         }
 
         if (!cryptoUtils.hasValidIdentity()) {
             if (chatListener != null) chatListener.onConnectionStatusChanged("❌ Abbruch: Keine Identität gefunden!\nBitte trage Device-ID, Public Key und Private Key manuell in den Einstellungen ein.");
+            isConnecting = false;
             return;
         }
 
@@ -169,17 +186,24 @@ public class OpenClawClient extends WebSocketListener {
             webSocket = client.newWebSocket(request, this);
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "Fehlerhaftes URL-Format", e);
+            isConnecting = false;
+            scheduleReconnect();
         }
     }
 
     public void disconnect() {
+        manualDisconnect = true;
+        reconnectHandler.removeCallbacksAndMessages(null);
         if (webSocket != null) {
             webSocket.close(1000, "User disconnected");
+            webSocket = null;
         }
     }
 
     @Override
     public void onOpen(@NonNull WebSocket webSocket, @NonNull Response response) {
+        isConnecting = false;
+        reconnectHandler.removeCallbacksAndMessages(null);
         if (chatListener != null) chatListener.onConnectionStatusChanged("Verbunden! Authentifiziere...");
     }
 
@@ -319,6 +343,26 @@ public class OpenClawClient extends WebSocketListener {
     @Override
     public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, Response response) {
         Log.e(TAG, "WebSocket Verbindungsfehler", t);
+        isConnecting = false;
         if (chatListener != null) chatListener.onConnectionStatusChanged("Verbindung fehlgeschlagen:\n" + t.getMessage());
+        scheduleReconnect();
+    }
+
+    @Override
+    public void onClosed(@NonNull WebSocket webSocket, int code, @NonNull String reason) {
+        isConnecting = false;
+        if (chatListener != null) chatListener.onConnectionStatusChanged("Verbindung getrennt.");
+        scheduleReconnect();
+    }
+
+    private void scheduleReconnect() {
+        if (manualDisconnect) return;
+        reconnectHandler.removeCallbacksAndMessages(null);
+        reconnectHandler.postDelayed(() -> {
+            if (!manualDisconnect) {
+                if (chatListener != null) chatListener.onConnectionStatusChanged("Versuche Reconnect...");
+                connect();
+            }
+        }, 5000); // 5 Sekunden warten, dann neuer Versuch (schont den Akku)
     }
 }
