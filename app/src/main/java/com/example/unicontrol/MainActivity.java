@@ -24,6 +24,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Parcelable;
 import android.util.Log;
+import android.view.Menu;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.LinearInterpolator;
@@ -43,6 +44,7 @@ import androidx.work.WorkInfo;
 import androidx.work.WorkManager;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.example.unicontrol.fragments.AppsFragment;
 import com.example.unicontrol.fragments.EchoFragment;
 import com.example.unicontrol.fragments.FotosFragment;
 import com.example.unicontrol.fragments.HomeFragment;
@@ -62,6 +64,7 @@ public class MainActivity extends AppCompatActivity {
 
     private Fragment echoFragment;
     private Fragment webUiFragment;
+    private Fragment appsFragment;
     private Fragment homeFragment;
     private Fragment fotosFragment;
     private Fragment settingsFragment;
@@ -92,33 +95,43 @@ public class MainActivity extends AppCompatActivity {
         BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
 
         SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, MODE_PRIVATE);
-        boolean modHome = prefs.getBoolean(SettingsFragment.KEY_MOD_HOME, true);
-        boolean modFotos = prefs.getBoolean(SettingsFragment.KEY_MOD_FOTOS, true);
-        boolean modEcho = prefs.getBoolean(SettingsFragment.KEY_MOD_ECHO, true);
-        boolean modWeb = prefs.getBoolean(SettingsFragment.KEY_MOD_WEB, true);
+        String defaultOrder = SettingsFragment.KEY_MOD_HOME + "," +
+                SettingsFragment.KEY_MOD_FOTOS + "," +
+                SettingsFragment.KEY_MOD_ECHO + "," +
+                SettingsFragment.KEY_MOD_APPS + "," +
+                SettingsFragment.KEY_MOD_WEB;
+        String orderString = prefs.getString(SettingsFragment.KEY_MOD_ORDER, defaultOrder);
+        String[] keys = orderString.split(",");
 
         if (savedInstanceState == null) {
             echoFragment = new EchoFragment();
             webUiFragment = new WebUiFragment();
+            appsFragment = new AppsFragment();
             homeFragment = new HomeFragment();
             fotosFragment = new FotosFragment();
             settingsFragment = new SettingsFragment();
 
             fm.beginTransaction().add(R.id.fragment_container, settingsFragment, "5").hide(settingsFragment).commit();
             fm.beginTransaction().add(R.id.fragment_container, fotosFragment, "4").hide(fotosFragment).commit();
+            fm.beginTransaction().add(R.id.fragment_container, appsFragment, "6").hide(appsFragment).commit();
             fm.beginTransaction().add(R.id.fragment_container, webUiFragment, "3").hide(webUiFragment).commit();
             fm.beginTransaction().add(R.id.fragment_container, echoFragment, "1").hide(echoFragment).commit();
             fm.beginTransaction().add(R.id.fragment_container, homeFragment, "2").hide(homeFragment).commit();
 
-            // Intelligenter Start: Wähle das erste Modul, das aktiviert ist!
+            // Intelligenter Start: Wähle das erste Modul in deiner gespeicherten Liste, das aktiviert ist!
             int startId = R.id.nav_settings;
             Fragment startFrag = settingsFragment;
             currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_SETTINGS, "#EAEAEA");
 
-            if (modHome) { startId = R.id.nav_home; startFrag = homeFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_HOME, "#B2D3C2"); }
-            else if (modFotos) { startId = R.id.nav_fotos; startFrag = fotosFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2"); }
-            else if (modEcho) { startId = R.id.nav_echo; startFrag = echoFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF"); }
-            else if (modWeb) { startId = R.id.nav_web; startFrag = webUiFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_WEB, "#FDFD96"); }
+            for (String key : keys) {
+                if (prefs.getBoolean(key, true)) {
+                    if (SettingsFragment.KEY_MOD_HOME.equals(key)) { startId = R.id.nav_home; startFrag = homeFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_HOME, "#B2D3C2"); break; }
+                    else if (SettingsFragment.KEY_MOD_FOTOS.equals(key)) { startId = R.id.nav_fotos; startFrag = fotosFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2"); break; }
+                    else if (SettingsFragment.KEY_MOD_ECHO.equals(key)) { startId = R.id.nav_echo; startFrag = echoFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF"); break; }
+                    else if (SettingsFragment.KEY_MOD_APPS.equals(key)) { startId = R.id.nav_apps; startFrag = appsFragment; currentColor = getDynamicColor(AppsFragment.KEY_COLOR_APPS, "#D3B8E8"); break; }
+                    else if (SettingsFragment.KEY_MOD_WEB.equals(key)) { startId = R.id.nav_web; startFrag = webUiFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_WEB, "#FDFD96"); break; }
+                }
+            }
 
             fm.beginTransaction().show(startFrag).commit();
             activeFragment = startFrag;
@@ -133,9 +146,11 @@ public class MainActivity extends AppCompatActivity {
             webUiFragment = fm.findFragmentByTag("3");
             fotosFragment = fm.findFragmentByTag("4");
             settingsFragment = fm.findFragmentByTag("5");
+            appsFragment = fm.findFragmentByTag("6");
 
             if (echoFragment != null && !echoFragment.isHidden()) activeFragment = echoFragment;
             else if (webUiFragment != null && !webUiFragment.isHidden()) activeFragment = webUiFragment;
+            else if (appsFragment != null && !appsFragment.isHidden()) activeFragment = appsFragment;
             else if (fotosFragment != null && !fotosFragment.isHidden()) activeFragment = fotosFragment;
             else if (settingsFragment != null && !settingsFragment.isHidden()) activeFragment = settingsFragment;
             else activeFragment = homeFragment;
@@ -144,6 +159,7 @@ public class MainActivity extends AppCompatActivity {
             if (activeFragment == homeFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_HOME, "#B2D3C2");
             else if (activeFragment == fotosFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2");
             else if (activeFragment == echoFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF");
+            else if (activeFragment == appsFragment) currentColor = getDynamicColor(AppsFragment.KEY_COLOR_APPS, "#D3B8E8");
             else if (activeFragment == webUiFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_WEB, "#FDFD96");
 
             refreshMenu();
@@ -161,6 +177,9 @@ public class MainActivity extends AppCompatActivity {
             if (itemId == R.id.nav_echo) {
                 newFragment = echoFragment;
                 targetColor = getDynamicColor(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF");
+            } else if (itemId == R.id.nav_apps) {
+                newFragment = appsFragment;
+                targetColor = getDynamicColor(AppsFragment.KEY_COLOR_APPS, "#D3B8E8");
             } else if (itemId == R.id.nav_web) {
                 newFragment = webUiFragment;
                 targetColor = getDynamicColor(SettingsFragment.KEY_COLOR_WEB, "#FDFD96");
@@ -235,25 +254,40 @@ public class MainActivity extends AppCompatActivity {
         checkNavigationIntent(getIntent());
     }
 
-    // --- NEU: Dynamische Anpassung der Menüleiste ---
     public void refreshMenu() {
         SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, MODE_PRIVATE);
-        boolean modHome = prefs.getBoolean(SettingsFragment.KEY_MOD_HOME, true);
-        boolean modFotos = prefs.getBoolean(SettingsFragment.KEY_MOD_FOTOS, true);
-        boolean modEcho = prefs.getBoolean(SettingsFragment.KEY_MOD_ECHO, true);
-        boolean modWeb = prefs.getBoolean(SettingsFragment.KEY_MOD_WEB, true);
+
+        String defaultOrder = SettingsFragment.KEY_MOD_HOME + "," +
+                SettingsFragment.KEY_MOD_FOTOS + "," +
+                SettingsFragment.KEY_MOD_ECHO + "," +
+                SettingsFragment.KEY_MOD_APPS + "," +
+                SettingsFragment.KEY_MOD_WEB;
+        String orderString = prefs.getString(SettingsFragment.KEY_MOD_ORDER, defaultOrder);
+        String[] keys = orderString.split(",");
 
         BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
         if (bottomNav != null) {
-            // Erstmal alles leeren und standardmäßig füllen (falls wir Module wieder einschalten)
+            // Leere die Menüleiste komplett
             bottomNav.getMenu().clear();
-            bottomNav.inflateMenu(R.menu.bottom_nav_menu);
 
-            // Nicht gewollte Module aus der Leiste werfen
-            if (!modHome) bottomNav.getMenu().removeItem(R.id.nav_home);
-            if (!modFotos) bottomNav.getMenu().removeItem(R.id.nav_fotos);
-            if (!modEcho) bottomNav.getMenu().removeItem(R.id.nav_echo);
-            if (!modWeb) bottomNav.getMenu().removeItem(R.id.nav_web);
+            // Füge die Tabs in der korrekten Reihenfolge wieder ein
+            for (String key : keys) {
+                if (prefs.getBoolean(key, true)) {
+                    if (SettingsFragment.KEY_MOD_HOME.equals(key)) {
+                        bottomNav.getMenu().add(Menu.NONE, R.id.nav_home, Menu.NONE, "Home").setIcon(R.drawable.ic_home);
+                    } else if (SettingsFragment.KEY_MOD_FOTOS.equals(key)) {
+                        bottomNav.getMenu().add(Menu.NONE, R.id.nav_fotos, Menu.NONE, "Fotos").setIcon(R.drawable.ic_flower);
+                    } else if (SettingsFragment.KEY_MOD_ECHO.equals(key)) {
+                        bottomNav.getMenu().add(Menu.NONE, R.id.nav_echo, Menu.NONE, "Echo").setIcon(R.drawable.ic_robot);
+                    } else if (SettingsFragment.KEY_MOD_APPS.equals(key)) {
+                        bottomNav.getMenu().add(Menu.NONE, R.id.nav_apps, Menu.NONE, "Apps").setIcon(android.R.drawable.ic_menu_edit);
+                    } else if (SettingsFragment.KEY_MOD_WEB.equals(key)) {
+                        bottomNav.getMenu().add(Menu.NONE, R.id.nav_web, Menu.NONE, "Web UI").setIcon(R.drawable.ic_globe);
+                    }
+                }
+            }
+            // Einstellungen immer ans Ende hängen
+            bottomNav.getMenu().add(Menu.NONE, R.id.nav_settings, Menu.NONE, "Einstellungen").setIcon(R.drawable.ic_settings);
         }
     }
 
@@ -294,38 +328,30 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // --- NEU: Der Lotse für die Onboarding-Tour ---
     public void goToNextOnboardingTab(int currentNavId) {
         BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
         if (bottomNav == null) return;
 
-        // Die ideale Tour-Reihenfolge durch die App
-        int[] order = {R.id.nav_home, R.id.nav_fotos, R.id.nav_echo, R.id.nav_web, R.id.nav_settings};
+        Menu menu = bottomNav.getMenu();
+        boolean foundCurrent = false;
 
-        int currentIndex = -1;
-        for (int i = 0; i < order.length; i++) {
-            if (order[i] == currentNavId) {
-                currentIndex = i;
-                break;
+        // Durchlaufe das dynamische Menü, finde den aktuellen Tab und wähle den NÄCHSTEN
+        for (int i = 0; i < menu.size(); i++) {
+            int id = menu.getItem(i).getItemId();
+            if (foundCurrent) {
+                bottomNav.setSelectedItemId(id);
+                return; // Nächster Tab gefunden und gewechselt!
+            }
+            if (id == currentNavId) {
+                foundCurrent = true;
             }
         }
 
-        if (currentIndex != -1) {
-            // Suche den nächsten AKTIVEN Tab
-            for (int i = currentIndex + 1; i < order.length; i++) {
-                int nextId = order[i];
-                if (bottomNav.getMenu().findItem(nextId) != null) {
-                    bottomNav.setSelectedItemId(nextId);
-                    return; // Nächster Tab gefunden und gewechselt!
-                }
-            }
-        }
-        // Fallback: Wenn wir am Ende sind (Settings) oder nichts finden -> Home
-        if (bottomNav.getMenu().findItem(R.id.nav_home) != null) {
-            bottomNav.setSelectedItemId(R.id.nav_home);
+        // Fallback: Wenn wir am Ende sind oder nichts finden -> Zurück zum ersten Item
+        if (menu.size() > 0) {
+            bottomNav.setSelectedItemId(menu.getItem(0).getItemId());
         }
     }
-    // ------------------------------------------
 
     private void handleNfcIntent(Intent intent) {
         if (intent == null || intent.getAction() == null) return;

@@ -24,7 +24,7 @@
             android:layout_marginBottom="24dp"
             android:layout_marginTop="16dp"/>
 
-        <!-- NEU: CARD 0: Module ein/ausschalten -->
+        <!-- CARD 0: Module ein/ausschalten -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -46,50 +46,20 @@
                     android:textSize="20sp"
                     android:textStyle="bold"
                     android:textColor="#333333"
+                    android:layout_marginBottom="8dp"/>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Tippen &amp; Halten zum Verschieben der Menüpunkte."
+                    android:textSize="12sp"
+                    android:textColor="#888888"
                     android:layout_marginBottom="16dp"/>
 
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/switch_mod_home"
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rv_modules"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="🏠 Home Assistant"
-                    android:textColor="#333333"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="16dp"
-                    app:thumbTint="#B2D3C2"
-                    app:trackTint="#D0D0D0"/>
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/switch_mod_fotos"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="☁️ Immich Fotos"
-                    android:textColor="#333333"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="16dp"
-                    app:thumbTint="#F49AC2"
-                    app:trackTint="#D0D0D0"/>
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/switch_mod_echo"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="💬 OpenClaw Echo"
-                    android:textColor="#333333"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="16dp"
-                    app:thumbTint="#AEC6CF"
-                    app:trackTint="#D0D0D0"/>
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/switch_mod_web"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="🌐 Web UI"
-                    android:textColor="#333333"
-                    android:textStyle="bold"
-                    app:thumbTint="#FDFD96"
-                    app:trackTint="#D0D0D0"/>
+                    android:layout_height="wrap_content" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -379,7 +349,59 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- CARD NEU: OpenClaw Identity Experten Modus -->
+        <!-- CARD NEU: App Entwicklung -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="20dp"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="24dp"
+            app:cardBackgroundColor="#FFFFFF">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🛠️ App Entwicklung"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="16dp"/>
+
+                <EditText
+                    android:id="@+id/et_apps_local"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Lokale URL (z.B. 192.168.86.46:8767)"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp" />
+
+                <EditText
+                    android:id="@+id/et_apps_public"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_pill_selected"
+                    android:backgroundTint="#F5F5F5"
+                    android:padding="16dp"
+                    android:hint="Public URL (z.B. coldnet.dedyn.io:8767)"
+                    android:textColorHint="#888888"
+                    android:textColor="#333333"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- CARD: OpenClaw Identity Experten Modus -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -494,6 +516,11 @@
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
                     <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Web UI" android:textColor="#333" android:gravity="center_vertical"/>
                     <EditText android:id="@+id/et_color_web" android:layout_width="120dp" android:layout_height="wrap_content" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F5F5F5" android:padding="12dp" android:hint="#FDFD96" android:textSize="14sp" android:gravity="center"/>
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Apps/Dev" android:textColor="#333" android:gravity="center_vertical"/>
+                    <EditText android:id="@+id/et_color_apps" android:layout_width="120dp" android:layout_height="wrap_content" android:background="@drawable/bg_pill_selected" android:backgroundTint="#F5F5F5" android:padding="12dp" android:hint="#D3B8E8" android:textSize="14sp" android:gravity="center"/>
                 </LinearLayout>
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
