@@ -320,6 +320,8 @@ public class OpenClawClient extends WebSocketListener {
         JsonObject params = new JsonObject();
         params.addProperty("minProtocol", 3);
         params.addProperty("maxProtocol", 3);
+
+        // HIER IST DER FIX: role und scopes werden dem params-Objekt hinzugefügt!
         params.addProperty("role", role);
 
         JsonArray scopesArray = new JsonArray();
