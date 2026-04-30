@@ -5,21 +5,24 @@
     android:layout_height="match_parent"
     android:background="#FF000000">
 
-    <!-- Das NEUE zoombare Bild (Ersetzt das alte ImageView) -->
+    <!-- Das zoombare Bild -->
     <com.github.chrisbanes.photoview.PhotoView
         android:id="@+id/image_fullscreen_item"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- NEU: Der echte Video-Player (Startet unsichtbar) -->
-    <VideoView
+    <!-- NEU: Media3 PlayerView ersetzt den alten VideoView -->
+    <!-- app:use_controller="false" schaltet die normale Play/Pause Leiste ab -->
+    <androidx.media3.ui.PlayerView
         android:id="@+id/video_fullscreen_item"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_gravity="center"
-        android:visibility="gone"/>
+        android:visibility="gone"
+        app:use_controller="false"
+        app:resize_mode="fit" />
 
-    <!-- NEU: Der große Play-Button für die Mitte -->
+    <!-- Der große Play-Button für die Mitte (wird in Stories versteckt) -->
     <ImageView
         android:id="@+id/btn_play_fullscreen_video"
         android:layout_width="72dp"

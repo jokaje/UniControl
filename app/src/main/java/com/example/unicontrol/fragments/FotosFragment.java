@@ -58,6 +58,15 @@ import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.viewpager2.widget.ViewPager2;
 
+// --- NEUE EXOPLAYER IMPORTE ---
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.Player;
+import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.MediaSource;
+import androidx.media3.exoplayer.source.ProgressiveMediaSource;
+import androidx.media3.ui.PlayerView;
+
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.load.model.GlideUrl;
 import com.bumptech.glide.load.model.LazyHeaders;
@@ -394,6 +403,12 @@ public class FotosFragment extends Fragment {
 
         fullscreenOverlay = view.findViewById(R.id.fullscreen_overlay);
         viewPagerFullscreen = view.findViewById(R.id.view_pager_fullscreen);
+
+        // NEU: Preloading für den ViewPager aktivieren, verhindert schwarze Übergänge in Stories
+        if (viewPagerFullscreen != null) {
+            viewPagerFullscreen.setOffscreenPageLimit(1);
+        }
+
         btnCloseFullscreen = view.findViewById(R.id.btn_close_fullscreen);
         btnFavorite = view.findViewById(R.id.btn_favorite);
 
@@ -3539,6 +3554,12 @@ public class FotosFragment extends Fragment {
             storyAnimator.cancel();
         }
 
+        // Stelle sicher, dass die aktuelle Progressbar bei 0 startet
+        if (storyProgressContainer != null && position < storyProgressContainer.getChildCount()) {
+            android.widget.ProgressBar pb = (android.widget.ProgressBar) storyProgressContainer.getChildAt(position);
+            if (pb != null) pb.setProgress(0);
+        }
+
         storyAnimator = android.animation.ValueAnimator.ofInt(0, 10000);
         storyAnimator.setDuration(3500);
         storyAnimator.setInterpolator(new android.view.animation.LinearInterpolator());
@@ -3556,10 +3577,12 @@ public class FotosFragment extends Fragment {
             @Override
             public void onAnimationEnd(android.animation.Animator animation) {
                 if (isStoryModeActive && viewPagerFullscreen != null && viewPagerFullscreen.getCurrentItem() == position && !isStoryPaused) {
-                    if (position < total - 1) {
-                        viewPagerFullscreen.setCurrentItem(position + 1, true);
-                    } else {
-                        closeFullscreen();
+                    if ((int) storyAnimator.getAnimatedValue() >= 9900) {
+                        if (position < total - 1) {
+                            viewPagerFullscreen.setCurrentItem(position + 1, false);
+                        } else {
+                            closeFullscreen();
+                        }
                     }
                 }
             }
@@ -3633,7 +3656,7 @@ public class FotosFragment extends Fragment {
             }
         }
 
-        FullscreenPagerAdapter pagerAdapter = new FullscreenPagerAdapter(getContext(), contextList, currentApiUrl, currentApiKey, new FullscreenPagerAdapter.SwipeListener() {
+        FullscreenPagerAdapter pagerAdapter = new FullscreenPagerAdapter(getContext(), contextList, currentApiUrl, currentApiKey, isStoryModeActive, new FullscreenPagerAdapter.SwipeListener() {
             @Override
             public void onSwipeUp() {
                 if (bottomSheetBehavior != null) bottomSheetBehavior.setState(BottomSheetBehavior.STATE_EXPANDED);
@@ -3655,16 +3678,21 @@ public class FotosFragment extends Fragment {
 
                 if (isStoryModeActive) {
                     int current = viewPagerFullscreen.getCurrentItem();
+                    int total = viewPagerFullscreen.getAdapter().getItemCount();
+
                     if (x < width * 0.3f) {
-                        if (current > 0) viewPagerFullscreen.setCurrentItem(current - 1, true);
-                        else if (storyAnimator != null) {
+                        if (current > 0) {
+                            viewPagerFullscreen.setCurrentItem(current - 1, false);
+                        } else if (storyAnimator != null) {
                             storyAnimator.cancel();
-                            storyAnimator.start();
+                            startStoryAutoPlay(0, total);
                         }
                     } else if (x > width * 0.7f) {
-                        int total = viewPagerFullscreen.getAdapter().getItemCount();
-                        if (current < total - 1) viewPagerFullscreen.setCurrentItem(current + 1, true);
-                        else closeFullscreen();
+                        if (current < total - 1) {
+                            viewPagerFullscreen.setCurrentItem(current + 1, false);
+                        } else {
+                            closeFullscreen();
+                        }
                     } else {
                         toggleFullscreenUI();
                     }
@@ -3683,6 +3711,18 @@ public class FotosFragment extends Fragment {
                         isStoryPaused = true;
                         storyAnimator.pause();
                         Toast.makeText(getContext(), "⏸️ Angehalten", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+            @Override
+            public void onVideoEnded() {
+                if (isStoryModeActive) {
+                    int current = viewPagerFullscreen.getCurrentItem();
+                    int total = viewPagerFullscreen.getAdapter().getItemCount();
+                    if (current < total - 1) {
+                        viewPagerFullscreen.setCurrentItem(current + 1, false);
+                    } else {
+                        closeFullscreen();
                     }
                 }
             }
@@ -3709,7 +3749,15 @@ public class FotosFragment extends Fragment {
                             else if (i > position) pb.setProgress(0);
                         }
                     }
-                    startStoryAutoPlay(position, contextList.size());
+
+                    boolean isVideo = currentViewedAsset.type != null && currentViewedAsset.type.equals("VIDEO");
+                    if (!isVideo) {
+                        startStoryAutoPlay(position, contextList.size());
+                    } else {
+                        if (storyAnimator != null) {
+                            storyAnimator.cancel();
+                        }
+                    }
                 }
             }
         };
@@ -3903,7 +3951,10 @@ public class FotosFragment extends Fragment {
         if (fullscreenOverlay != null) {
             fullscreenOverlay.animate().alpha(0f).setDuration(250).withEndAction(() -> {
                 fullscreenOverlay.setVisibility(View.GONE);
-                if (viewPagerFullscreen != null) viewPagerFullscreen.setAdapter(null);
+                if (viewPagerFullscreen != null) {
+                    viewPagerFullscreen.setOffscreenPageLimit(ViewPager2.OFFSCREEN_PAGE_LIMIT_DEFAULT);
+                    viewPagerFullscreen.setAdapter(null);
+                }
                 hideKeyboard();
                 Glide.get(requireContext()).clearMemory();
             }).start();
@@ -3918,6 +3969,11 @@ public class FotosFragment extends Fragment {
             if (!globalAssetList.isEmpty() && recyclerViewFotos != null && "Fotos".equals(activeTab)) {
                 recyclerViewFotos.post(this::refreshVisibleGrids);
             }
+        } else {
+            if (isStoryModeActive && storyAnimator != null) {
+                isStoryPaused = true;
+                storyAnimator.pause();
+            }
         }
     }
 
@@ -3927,6 +3983,19 @@ public class FotosFragment extends Fragment {
         loadAppropriateUrlAndKey();
         if (!globalAssetList.isEmpty() && recyclerViewFotos != null && "Fotos".equals(activeTab)) {
             recyclerViewFotos.post(this::refreshVisibleGrids);
+        }
+        if (isStoryModeActive && storyAnimator != null && isStoryPaused) {
+            isStoryPaused = false;
+            storyAnimator.resume();
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        if (isStoryModeActive && storyAnimator != null) {
+            isStoryPaused = true;
+            storyAnimator.pause();
         }
     }
 
@@ -4421,21 +4490,24 @@ public class FotosFragment extends Fragment {
         private final List<ImmichAsset> assets;
         private final String baseUrl;
         private final String apiKey;
+        private final boolean isStoryMode;
 
         public interface SwipeListener {
             void onSwipeUp();
             void onSwipeDown();
             void onSingleTap(float x, float width);
             void onLongPress();
+            void onVideoEnded();
         }
 
         private final SwipeListener swipeListener;
 
-        public FullscreenPagerAdapter(Context context, List<ImmichAsset> assets, String baseUrl, String apiKey, SwipeListener listener) {
+        public FullscreenPagerAdapter(Context context, List<ImmichAsset> assets, String baseUrl, String apiKey, boolean isStoryMode, SwipeListener listener) {
             this.context = context;
             this.assets = assets;
             this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
             this.apiKey = apiKey;
+            this.isStoryMode = isStoryMode;
             this.swipeListener = listener;
         }
 
@@ -4454,75 +4526,71 @@ public class FotosFragment extends Fragment {
 
             holder.imageView.setVisibility(View.VISIBLE);
             if (holder.videoView != null) holder.videoView.setVisibility(View.GONE);
+            if (holder.btnPlay != null) holder.btnPlay.setVisibility(View.GONE);
 
             if (asset.isLocalOnly && asset.localUri != null) {
-                Glide.with(context)
-                        .load(Uri.parse(asset.localUri))
-                        .fitCenter()
-                        .into(holder.imageView);
-
-                if (isVideo && holder.btnPlay != null) {
-                    holder.btnPlay.setVisibility(View.VISIBLE);
-                    holder.btnPlay.setOnClickListener(v -> {
-                        holder.imageView.setVisibility(View.GONE);
-                        holder.btnPlay.setVisibility(View.GONE);
-                        if (holder.videoView != null) {
-                            holder.videoView.setVisibility(View.VISIBLE);
-                            holder.videoView.setVideoURI(Uri.parse(asset.localUri));
-                            MediaController mc = new MediaController(context);
-                            mc.setAnchorView(holder.videoView);
-                            holder.videoView.setMediaController(mc);
-                            holder.videoView.start();
-                        }
-                    });
-                } else if (holder.btnPlay != null) {
-                    holder.btnPlay.setVisibility(View.GONE);
-                }
+                Glide.with(context).load(Uri.parse(asset.localUri)).fitCenter().into(holder.imageView);
             } else {
-                String imageUrl;
-                if (isVideo) imageUrl = baseUrl + "/api/assets/" + asset.id + "/thumbnail";
-                else imageUrl = baseUrl + "/api/assets/" + asset.id + "/original";
-
-                GlideUrl glideUrl = new GlideUrl(imageUrl, new LazyHeaders.Builder()
-                        .addHeader("x-api-key", apiKey)
-                        .addHeader("Accept", "application/json")
-                        .build());
-
+                String imageUrl = isVideo ? (baseUrl + "/api/assets/" + asset.id + "/thumbnail") : (baseUrl + "/api/assets/" + asset.id + "/original");
+                GlideUrl glideUrl = new GlideUrl(imageUrl, new LazyHeaders.Builder().addHeader("x-api-key", apiKey).addHeader("Accept", "application/json").build());
                 Glide.with(context).load(glideUrl).fitCenter().into(holder.imageView);
+            }
 
-                if (isVideo && holder.btnPlay != null) {
+            if (isVideo) {
+                if (holder.exoPlayer == null) {
+                    holder.exoPlayer = new ExoPlayer.Builder(context).build();
+                    holder.videoView.setPlayer(holder.exoPlayer);
+                    holder.exoPlayer.addListener(new Player.Listener() {
+                        @Override
+                        public void onPlaybackStateChanged(int playbackState) {
+                            if (playbackState == Player.STATE_ENDED) {
+                                swipeListener.onVideoEnded();
+                            }
+                        }
+                    });
+                }
+
+                if (asset.isLocalOnly && asset.localUri != null) {
+                    holder.exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(asset.localUri)));
+                } else {
+                    String videoUrl = baseUrl + "/api/assets/" + asset.id + "/original";
+                    DefaultHttpDataSource.Factory dataSourceFactory = new DefaultHttpDataSource.Factory()
+                            .setDefaultRequestProperties(Collections.singletonMap("x-api-key", apiKey));
+                    MediaSource mediaSource = new ProgressiveMediaSource.Factory(dataSourceFactory)
+                            .createMediaSource(MediaItem.fromUri(Uri.parse(videoUrl)));
+                    holder.exoPlayer.setMediaSource(mediaSource);
+                }
+                holder.exoPlayer.prepare();
+
+                if (isStoryMode) {
+                    holder.imageView.setVisibility(View.GONE);
+                    holder.videoView.setVisibility(View.VISIBLE);
+                    holder.exoPlayer.setPlayWhenReady(true);
+                } else if (holder.btnPlay != null) {
                     holder.btnPlay.setVisibility(View.VISIBLE);
                     holder.btnPlay.setOnClickListener(v -> {
                         holder.imageView.setVisibility(View.GONE);
                         holder.btnPlay.setVisibility(View.GONE);
-                        if (holder.videoView != null) {
-                            holder.videoView.setVisibility(View.VISIBLE);
-                            String videoUrl = baseUrl + "/api/assets/" + asset.id + "/original";
-                            Map<String, String> headers = new HashMap<>();
-                            headers.put("x-api-key", apiKey);
-                            holder.videoView.setVideoURI(Uri.parse(videoUrl), headers);
-                            MediaController mc = new MediaController(context);
-                            mc.setAnchorView(holder.videoView);
-                            holder.videoView.setMediaController(mc);
-                            holder.videoView.start();
-                        }
+                        holder.videoView.setVisibility(View.VISIBLE);
+                        holder.exoPlayer.setPlayWhenReady(true);
                     });
-                } else if (holder.btnPlay != null) {
-                    holder.btnPlay.setVisibility(View.GONE);
                 }
             }
 
-            holder.imageView.setOnViewTapListener((view, x, y) -> {
-                swipeListener.onSingleTap(x, view.getWidth());
-            });
+            holder.imageView.setOnViewTapListener((view, x, y) -> swipeListener.onSingleTap(x, view.getWidth()));
+            holder.imageView.setOnPhotoTapListener((view, x, y) -> swipeListener.onSingleTap(x * view.getWidth(), view.getWidth()));
+            holder.imageView.setOnLongClickListener(v -> { swipeListener.onLongPress(); return true; });
 
-            holder.imageView.setOnPhotoTapListener((view, x, y) -> {
-                swipeListener.onSingleTap(x * view.getWidth(), view.getWidth());
-            });
+            holder.imageView.setOnSingleFlingListener((MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) -> {
+                if (e1 == null || e2 == null) return false;
+                float diffY = e2.getY() - e1.getY();
+                float diffX = e2.getX() - e1.getX();
 
-            holder.imageView.setOnLongClickListener(v -> {
-                swipeListener.onLongPress();
-                return true;
+                if (Math.abs(diffY) > Math.abs(diffX)) {
+                    if (diffY < -50 && Math.abs(velocityY) > 100) { swipeListener.onSwipeUp(); return true; }
+                    else if (diffY > 50 && Math.abs(velocityY) > 100) { swipeListener.onSwipeDown(); return true; }
+                }
+                return false;
             });
 
             if (holder.videoView != null) {
@@ -4537,48 +4605,38 @@ public class FotosFragment extends Fragment {
                                 swipeListener.onSingleTap(event.getX(), v.getWidth());
                             }
                         }
-                        return false;
+                        return true;
                     }
                 });
-                holder.videoView.setOnLongClickListener(v -> {
-                    swipeListener.onLongPress();
-                    return true;
-                });
             }
-
-            holder.imageView.setOnSingleFlingListener((MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) -> {
-                if (e1 == null || e2 == null) return false;
-                float diffY = e2.getY() - e1.getY();
-                float diffX = e2.getX() - e1.getX();
-
-                if (Math.abs(diffY) > Math.abs(diffX)) {
-                    if (diffY < -50 && Math.abs(velocityY) > 100) { swipeListener.onSwipeUp(); return true; }
-                    else if (diffY > 50 && Math.abs(velocityY) > 100) { swipeListener.onSwipeDown(); return true; }
-                }
-                return false;
-            });
         }
 
         @Override
         public void onViewRecycled(@NonNull PagerViewHolder holder) {
             super.onViewRecycled(holder);
             Glide.with(context).clear(holder.imageView);
-            if (holder.videoView != null && holder.videoView.isPlaying()) {
-                holder.videoView.stopPlayback();
-            }
+            releasePlayer(holder);
         }
 
         @Override
         public void onViewDetachedFromWindow(@NonNull PagerViewHolder holder) {
             super.onViewDetachedFromWindow(holder);
-            if (holder.videoView != null && holder.videoView.isPlaying()) holder.videoView.stopPlayback();
+            releasePlayer(holder);
+        }
+
+        private void releasePlayer(PagerViewHolder holder) {
+            if (holder.exoPlayer != null) {
+                holder.exoPlayer.release();
+                holder.exoPlayer = null;
+            }
         }
 
         @Override public int getItemCount() { return assets.size(); }
 
         public static class PagerViewHolder extends RecyclerView.ViewHolder {
             com.github.chrisbanes.photoview.PhotoView imageView;
-            VideoView videoView;
+            PlayerView videoView;
+            ExoPlayer exoPlayer;
             ImageView btnPlay;
 
             public PagerViewHolder(@NonNull View itemView) {
