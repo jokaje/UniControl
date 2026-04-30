@@ -41,6 +41,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.VideoView;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
@@ -257,6 +258,26 @@ public class FotosFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+
+        // --- NEU: Back-Button abfangen ---
+        requireActivity().getOnBackPressedDispatcher().addCallback(getViewLifecycleOwner(), new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (fullscreenOverlay != null && fullscreenOverlay.getVisibility() == View.VISIBLE) {
+                    closeFullscreen();
+                } else if (bottomSheetBehavior != null && (bottomSheetBehavior.getState() == BottomSheetBehavior.STATE_EXPANDED || bottomSheetBehavior.getState() == BottomSheetBehavior.STATE_HALF_EXPANDED)) {
+                    bottomSheetBehavior.setState(BottomSheetBehavior.STATE_HIDDEN);
+                } else if (layoutSelectionBar != null && layoutSelectionBar.getVisibility() == View.VISIBLE) {
+                    if (currentFotosAdapter != null) currentFotosAdapter.clearSelection();
+                } else {
+                    // Weiterleiten an das System / die Activity, wenn wir nichts abfangen müssen
+                    setEnabled(false);
+                    requireActivity().getOnBackPressedDispatcher().onBackPressed();
+                    setEnabled(true);
+                }
+            }
+        });
+        // ---------------------------------
 
         view.setBackgroundColor(getThemeColor());
 
