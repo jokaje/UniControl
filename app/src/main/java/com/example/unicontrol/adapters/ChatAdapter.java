@@ -33,7 +33,6 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private List<ChatMessage> messages = new ArrayList<>();
     private int themeColor = Color.parseColor("#AEC6CF");
 
-    // NEU: Unser Markdown Parser
     private Markwon markwon;
 
     public interface MessageClickListener {
@@ -84,7 +83,6 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     @NonNull
     @Override
     public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        // Markwon wird beim ersten Mal initialisiert
         if (markwon == null) {
             markwon = Markwon.create(parent.getContext());
         }
@@ -92,6 +90,9 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         LayoutInflater inflater = LayoutInflater.from(parent.getContext());
         if (viewType == VIEW_TYPE_USER) {
             return new MessageViewHolder(inflater.inflate(R.layout.item_chat_user, parent, false));
+        } else if (viewType == VIEW_TYPE_SYSTEM) {
+            // Wir können hier ein spezielles System-Layout nutzen oder das Agent-Layout anpassen
+            return new MessageViewHolder(inflater.inflate(R.layout.item_chat_agent, parent, false));
         } else {
             return new MessageViewHolder(inflater.inflate(R.layout.item_chat_agent, parent, false));
         }
@@ -101,88 +102,20 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
         ChatMessage msg = messages.get(position);
         MessageViewHolder vh = (MessageViewHolder) holder;
-
         int viewType = getItemViewType(position);
 
+        // Standard-Reset für LongClick
+        vh.tvMessage.setOnLongClickListener(null);
+
         if (viewType == VIEW_TYPE_USER) {
-            if (vh.cardView != null) vh.cardView.setCardBackgroundColor(themeColor);
-            boolean isDark = ColorUtils.calculateLuminance(themeColor) < 0.5;
-            vh.tvMessage.setTextColor(isDark ? Color.WHITE : Color.parseColor("#333333"));
-            vh.tvMessage.setTypeface(null, Typeface.NORMAL);
-
-            if (msg.hasAttachment() && vh.ivAttachment != null) {
-                if (msg.getMimeType() != null && msg.getMimeType().startsWith("image/")) {
-                    try {
-                        Uri uri = Uri.parse(msg.getAttachmentUri());
-                        if ("content".equals(uri.getScheme())) {
-                            vh.ivAttachment.setVisibility(View.GONE);
-                        } else {
-                            vh.ivAttachment.setVisibility(View.VISIBLE);
-                            vh.ivAttachment.setImageURI(uri);
-                        }
-                    } catch (Exception e) {
-                        vh.ivAttachment.setVisibility(View.GONE);
-                        e.printStackTrace();
-                    }
-                } else {
-                    vh.ivAttachment.setVisibility(View.GONE);
-                }
-            } else if (vh.ivAttachment != null) {
-                vh.ivAttachment.setVisibility(View.GONE);
-            }
-
-            if (msg.getText() == null || msg.getText().isEmpty()) {
-                vh.tvMessage.setVisibility(View.GONE);
-            } else {
-                vh.tvMessage.setVisibility(View.VISIBLE);
-                // Text normal setzen (eigene Nachrichten formatieren wir meist nicht)
-                vh.tvMessage.setText(msg.getText());
-            }
-
+            setupUserMessage(vh, msg);
         } else if (viewType == VIEW_TYPE_SYSTEM) {
-            if (vh.cardView != null) {
-                vh.cardView.setCardBackgroundColor(Color.TRANSPARENT);
-                vh.cardView.setCardElevation(0f);
-                LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) vh.cardView.getLayoutParams();
-                params.gravity = Gravity.CENTER;
-                vh.cardView.setLayoutParams(params);
-            }
-            vh.tvMessage.setTextColor(Color.parseColor("#888888"));
-            vh.tvMessage.setTextSize(12f);
-            vh.tvMessage.setTypeface(null, Typeface.NORMAL);
-            if (vh.ivAttachment != null) vh.ivAttachment.setVisibility(View.GONE);
-            vh.tvMessage.setVisibility(View.VISIBLE);
-            vh.tvMessage.setText(msg.getText());
-
+            setupSystemMessage(vh, msg);
         } else {
-            // AGENT (Links)
-            if (vh.cardView != null) {
-                vh.cardView.setCardBackgroundColor(Color.WHITE);
-                vh.cardView.setCardElevation(1f);
-                LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) vh.cardView.getLayoutParams();
-                params.gravity = Gravity.START;
-                vh.cardView.setLayoutParams(params);
-            }
-
-            if (msg.isTypingIndicator()) {
-                vh.tvMessage.setTextColor(Color.parseColor("#999999"));
-                vh.tvMessage.setTypeface(null, Typeface.ITALIC);
-                vh.tvMessage.setText(msg.getText());
-            } else {
-                vh.tvMessage.setTextColor(Color.parseColor("#333333"));
-                vh.tvMessage.setTypeface(null, Typeface.NORMAL);
-
-                // --- NEU: HIER PASSIERT DIE MARKDOWN MAGIE! ---
-                if (msg.getText() != null) {
-                    markwon.setMarkdown(vh.tvMessage, msg.getText());
-                }
-            }
-
-            vh.tvMessage.setTextSize(16f);
-            if (vh.ivAttachment != null) vh.ivAttachment.setVisibility(View.GONE);
-            vh.tvMessage.setVisibility(View.VISIBLE);
+            setupAgentMessage(vh, msg);
         }
 
+        // Zentraler Long-Click Handler für die Karte
         if (vh.cardView != null) {
             vh.cardView.setOnLongClickListener(v -> {
                 if (messageClickListener != null && !msg.isSystem() && !msg.isTypingIndicator()) {
@@ -191,6 +124,87 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 }
                 return false;
             });
+
+            // WICHTIG: Da Markwon Links klickbar macht, fängt die TextView LongClicks ab.
+            // Wir leiten den LongClick der TextView manuell an die Karte weiter.
+            vh.tvMessage.setOnLongClickListener(v -> vh.cardView.performLongClick());
+        }
+    }
+
+    private void setupUserMessage(MessageViewHolder vh, ChatMessage msg) {
+        if (vh.cardView != null) vh.cardView.setCardBackgroundColor(themeColor);
+        boolean isDark = ColorUtils.calculateLuminance(themeColor) < 0.5;
+        vh.tvMessage.setTextColor(isDark ? Color.WHITE : Color.parseColor("#333333"));
+        vh.tvMessage.setTypeface(null, Typeface.NORMAL);
+
+        if (msg.hasAttachment() && vh.ivAttachment != null) {
+            handleAttachment(vh, msg);
+        } else if (vh.ivAttachment != null) {
+            vh.ivAttachment.setVisibility(View.GONE);
+        }
+
+        if (msg.getText() == null || msg.getText().isEmpty()) {
+            vh.tvMessage.setVisibility(View.GONE);
+        } else {
+            vh.tvMessage.setVisibility(View.VISIBLE);
+            vh.tvMessage.setText(msg.getText());
+        }
+    }
+
+    private void setupAgentMessage(MessageViewHolder vh, ChatMessage msg) {
+        if (vh.cardView != null) {
+            vh.cardView.setCardBackgroundColor(Color.WHITE);
+            vh.cardView.setCardElevation(2f); // Etwas mehr Tiefe
+            LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) vh.cardView.getLayoutParams();
+            params.gravity = Gravity.START;
+            vh.cardView.setLayoutParams(params);
+        }
+
+        if (msg.isTypingIndicator()) {
+            vh.tvMessage.setTextColor(Color.parseColor("#999999"));
+            vh.tvMessage.setTypeface(null, Typeface.ITALIC);
+            vh.tvMessage.setText(msg.getText());
+        } else {
+            vh.tvMessage.setTextColor(Color.parseColor("#333333"));
+            vh.tvMessage.setTypeface(null, Typeface.NORMAL);
+            if (msg.getText() != null) {
+                markwon.setMarkdown(vh.tvMessage, msg.getText());
+            }
+        }
+
+        vh.tvMessage.setTextSize(16f);
+        if (vh.ivAttachment != null) vh.ivAttachment.setVisibility(View.GONE);
+        vh.tvMessage.setVisibility(View.VISIBLE);
+    }
+
+    private void setupSystemMessage(MessageViewHolder vh, ChatMessage msg) {
+        if (vh.cardView != null) {
+            vh.cardView.setCardBackgroundColor(Color.TRANSPARENT);
+            vh.cardView.setCardElevation(0f);
+            LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) vh.cardView.getLayoutParams();
+            params.gravity = Gravity.CENTER;
+            vh.cardView.setLayoutParams(params);
+        }
+        vh.tvMessage.setTextColor(Color.parseColor("#888888"));
+        vh.tvMessage.setTextSize(12f);
+        vh.tvMessage.setTypeface(null, Typeface.NORMAL);
+        vh.tvMessage.setGravity(Gravity.CENTER);
+        if (vh.ivAttachment != null) vh.ivAttachment.setVisibility(View.GONE);
+        vh.tvMessage.setVisibility(View.VISIBLE);
+        vh.tvMessage.setText(msg.getText());
+    }
+
+    private void handleAttachment(MessageViewHolder vh, ChatMessage msg) {
+        if (msg.getMimeType() != null && msg.getMimeType().startsWith("image/")) {
+            try {
+                Uri uri = Uri.parse(msg.getAttachmentUri());
+                vh.ivAttachment.setVisibility(View.VISIBLE);
+                vh.ivAttachment.setImageURI(uri);
+            } catch (Exception e) {
+                vh.ivAttachment.setVisibility(View.GONE);
+            }
+        } else {
+            vh.ivAttachment.setVisibility(View.GONE);
         }
     }
 
