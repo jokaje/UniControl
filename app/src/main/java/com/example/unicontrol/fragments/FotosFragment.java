@@ -80,6 +80,8 @@ import com.example.unicontrol.models.ImmichAlbum;
 import com.example.unicontrol.models.ImmichAsset;
 import com.example.unicontrol.models.ImmichMemory;
 import com.example.unicontrol.models.ImmichPerson;
+import com.example.unicontrol.network.ImmichApi;
+import com.example.unicontrol.network.RetrofitClient;
 import com.example.unicontrol.utils.NetworkUtils;
 import com.example.unicontrol.viewmodels.SharedViewModel;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
@@ -1112,33 +1114,17 @@ public class FotosFragment extends Fragment {
         tvAlbumsLoading.setVisibility(View.VISIBLE);
         recyclerViewAlbums.setVisibility(View.GONE);
 
-        Executors.newSingleThreadExecutor().execute(() -> {
-            try {
-                String cleanBaseUrl = currentApiUrl.endsWith("/") ? currentApiUrl.substring(0, currentApiUrl.length() - 1) : currentApiUrl;
-                URL url = new URL(cleanBaseUrl + "/api/albums");
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("x-api-key", currentApiKey);
-                conn.setRequestProperty("Accept", "application/json");
+        ImmichApi api = RetrofitClient.getImmichApi(currentApiUrl);
 
-                int responseCode = conn.getResponseCode();
-                if (responseCode == 404 || responseCode == 405) {
-                    url = new URL(cleanBaseUrl + "/api/album");
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setRequestProperty("x-api-key", currentApiKey);
-                    conn.setRequestProperty("Accept", "application/json");
-                    responseCode = conn.getResponseCode();
-                }
+        // Retrofit .enqueue() führt den Aufruf asynchron im Hintergrund aus
+        // und kehrt für onResponse/onFailure AUTOMATISCH auf den Main-Thread zurück!
+        api.getAlbums(currentApiKey).enqueue(new retrofit2.Callback<JsonElement>() {
+            @Override
+            public void onResponse(@NonNull retrofit2.Call<JsonElement> call, @NonNull retrofit2.Response<JsonElement> response) {
+                if (getActivity() == null) return;
 
-                if (responseCode == 200 || responseCode == 201) {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                    StringBuilder response = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) response.append(line);
-                    reader.close();
-
-                    JsonElement root = JsonParser.parseString(response.toString());
+                if (response.isSuccessful() && response.body() != null) {
+                    JsonElement root = response.body();
                     JsonArray albumsArray = null;
 
                     if (root.isJsonArray()) albumsArray = root.getAsJsonArray();
@@ -1151,31 +1137,24 @@ public class FotosFragment extends Fragment {
                         globalAlbumList = new Gson().fromJson(albumsArray, new TypeToken<List<ImmichAlbum>>(){}.getType());
                     }
 
-                    if (getActivity() != null) {
-                        getActivity().runOnUiThread(() -> {
-                            tvAlbumsLoading.setVisibility(View.GONE);
-                            if (globalAlbumList != null && !globalAlbumList.isEmpty()) {
-                                recyclerViewAlbums.setVisibility(View.VISIBLE);
-                                displayAlbums(globalAlbumList);
-                            } else {
-                                Toast.makeText(getContext(), "Du hast noch keine Alben erstellt.", Toast.LENGTH_SHORT).show();
-                            }
-                        });
+                    tvAlbumsLoading.setVisibility(View.GONE);
+                    if (globalAlbumList != null && !globalAlbumList.isEmpty()) {
+                        recyclerViewAlbums.setVisibility(View.VISIBLE);
+                        displayAlbums(globalAlbumList);
+                    } else {
+                        Toast.makeText(getContext(), "Du hast noch keine Alben erstellt.", Toast.LENGTH_SHORT).show();
                     }
                 } else {
-                    if (getActivity() != null) {
-                        int finalResponseCode = responseCode;
-                        getActivity().runOnUiThread(() -> {
-                            tvAlbumsLoading.setVisibility(View.GONE);
-                            Toast.makeText(getContext(), "Fehler beim Laden der Alben (" + finalResponseCode + ")", Toast.LENGTH_SHORT).show();
-                        });
-                    }
-                }
-            } catch (Exception e) {
-                if (getActivity() != null) getActivity().runOnUiThread(() -> {
                     tvAlbumsLoading.setVisibility(View.GONE);
-                    Toast.makeText(getContext(), "Verbindungsfehler zu Alben.", Toast.LENGTH_SHORT).show();
-                });
+                    Toast.makeText(getContext(), "Fehler beim Laden der Alben (" + response.code() + ")", Toast.LENGTH_SHORT).show();
+                }
+            }
+
+            @Override
+            public void onFailure(@NonNull retrofit2.Call<JsonElement> call, @NonNull Throwable t) {
+                if (getActivity() == null) return;
+                tvAlbumsLoading.setVisibility(View.GONE);
+                Toast.makeText(getContext(), "Verbindungsfehler zu Alben: " + t.getMessage(), Toast.LENGTH_SHORT).show();
             }
         });
     }

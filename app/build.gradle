@@ -59,4 +59,8 @@ dependencies {
 
     implementation libs.media3.exoplayer
     implementation libs.media3.ui
+
+    // NEU: Retrofit für saubere Netzwerk-Calls
+    implementation libs.retrofit
+    implementation libs.converter.gson
 }
