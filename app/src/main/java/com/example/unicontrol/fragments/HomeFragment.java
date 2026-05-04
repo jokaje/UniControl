@@ -157,7 +157,7 @@ public class HomeFragment extends Fragment {
             if (btnIntroSkip != null) {
                 btnIntroSkip.setOnClickListener(v -> {
                     settingsManager.setModuleEnabled(SettingsManager.KEY_MOD_HOME, false);
-                    Toast.makeText(getContext(), "Home-Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), getString(R.string.home_module_hidden), Toast.LENGTH_SHORT).show();
 
                     if (getActivity() instanceof MainActivity) {
                         ((MainActivity) getActivity()).refreshMenu();
@@ -174,7 +174,7 @@ public class HomeFragment extends Fragment {
                     settingsManager.setHomePublic(etSetupPublic.getText().toString().trim());
                     settingsManager.setHomeToken(etSetupToken.getText().toString().trim());
 
-                    Toast.makeText(getContext(), "Home Assistant verbunden! ✅", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), getString(R.string.home_connected), Toast.LENGTH_SHORT).show();
 
                     layoutHomeSetup.setVisibility(View.GONE);
                     layoutHomeContent.setVisibility(View.VISIBLE);
@@ -222,6 +222,7 @@ public class HomeFragment extends Fragment {
         } else {
             webView.setVisibility(View.GONE);
             tvPlaceholder.setVisibility(View.VISIBLE);
+            tvPlaceholder.setText(getString(R.string.home_missing_config));
             currentLoadedUrl = "";
         }
     }

@@ -464,7 +464,7 @@ public class FotosFragment extends Fragment {
             if (tvPlaceholder != null) {
                 if (assets.isEmpty()) {
                     tvPlaceholder.setVisibility(View.VISIBLE);
-                    tvPlaceholder.setText("Keine Bilder gefunden.");
+                    tvPlaceholder.setText(getString(R.string.fotos_empty));
                     if (recyclerViewFotos != null) recyclerViewFotos.setVisibility(View.GONE);
                 } else {
                     tvPlaceholder.setVisibility(View.GONE);
@@ -505,7 +505,7 @@ public class FotosFragment extends Fragment {
                     recyclerViewAlbums.setVisibility(View.VISIBLE);
                     displayAlbums(globalAlbumList);
                 } else {
-                    Toast.makeText(getContext(), "Du hast noch keine Alben erstellt.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), getString(R.string.fotos_no_albums), Toast.LENGTH_SHORT).show();
                 }
             }
         });
@@ -524,7 +524,7 @@ public class FotosFragment extends Fragment {
             tvSearchLoading.setVisibility(View.GONE);
 
             if (results.isEmpty()) {
-                showSearchError("Keine Ergebnisse gefunden.");
+                showSearchError(getString(R.string.fotos_search_no_results));
                 return;
             }
 
@@ -687,10 +687,10 @@ public class FotosFragment extends Fragment {
         }
 
         new AlertDialog.Builder(getContext())
-                .setTitle(selected.size() + (selected.size() == 1 ? " Foto ausblenden/löschen" : " Fotos ausblenden/löschen"))
-                .setMessage("Möchtest du diese Bilder in der Cloud löschen bzw. dauerhaft auf diesem Gerät ausblenden?")
-                .setPositiveButton("Ja, weg damit", (dialog, which) -> {
-                    Toast.makeText(getContext(), "Wird verarbeitet...", Toast.LENGTH_SHORT).show();
+                .setTitle(getString(R.string.fotos_delete_title, selected.size()))
+                .setMessage(getString(R.string.fotos_delete_message))
+                .setPositiveButton(getString(R.string.fotos_delete_confirm), (dialog, which) -> {
+                    Toast.makeText(getContext(), getString(R.string.fotos_processing), Toast.LENGTH_SHORT).show();
 
                     Set<String> blacklist = new HashSet<>(settingsManager.getPrefs().getStringSet("blacklisted_local_assets", new HashSet<>()));
 
@@ -705,7 +705,7 @@ public class FotosFragment extends Fragment {
                             clearSelectionUI();
                             refreshVisibleGrids();
                             if (fullscreenOverlay != null && fullscreenOverlay.getVisibility() == View.VISIBLE) closeFullscreen();
-                            Toast.makeText(getContext(), "Aus der Ansicht entfernt!", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(getContext(), getString(R.string.fotos_removed_view), Toast.LENGTH_SHORT).show();
                         }
                     }
 
@@ -737,7 +737,7 @@ public class FotosFragment extends Fragment {
                                 clearSelectionUI();
                                 refreshVisibleGrids();
                                 if (fullscreenOverlay != null && fullscreenOverlay.getVisibility() == View.VISIBLE) closeFullscreen();
-                                Toast.makeText(getContext(), deletedAssets.size() + (deletedAssets.size() == 1 ? " Element gelöscht" : " Elemente gelöscht"), Toast.LENGTH_SHORT).show();
+                                Toast.makeText(getContext(), getString(R.string.fotos_deleted_success, deletedAssets.size()), Toast.LENGTH_SHORT).show();
                             }
 
                             @Override
@@ -747,7 +747,7 @@ public class FotosFragment extends Fragment {
                         });
                     }
                 })
-                .setNegativeButton("Abbrechen", null).show();
+                .setNegativeButton(getString(R.string.action_cancel), null).show();
     }
 
     private void showMultiActionMenu() {
@@ -2291,7 +2291,7 @@ public class FotosFragment extends Fragment {
 
         if (locals.isEmpty()) return;
 
-        Toast.makeText(getContext(), locals.size() + (locals.size() == 1 ? " Bild wird hochgeladen..." : " Bilder werden hochgeladen..."), Toast.LENGTH_LONG).show();
+        Toast.makeText(getContext(), getString(R.string.fotos_upload_starting, locals.size()), Toast.LENGTH_LONG).show();
 
         CryptoUtils cryptoUtils = new CryptoUtils(requireContext());
         String deviceId = cryptoUtils.getDeviceId();
@@ -2320,9 +2320,9 @@ public class FotosFragment extends Fragment {
                 refreshVisibleGrids();
 
                 if (failCount == 0) {
-                    Toast.makeText(getContext(), "Alle " + successCount + " Uploads erfolgreich! ☁️➡️✅", Toast.LENGTH_LONG).show();
+                    Toast.makeText(getContext(), getString(R.string.fotos_upload_success, successCount), Toast.LENGTH_LONG).show();
                 } else {
-                    Toast.makeText(getContext(), successCount + " erfolgreich, " + failCount + " fehlgeschlagen.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(getContext(), getString(R.string.fotos_upload_partial, successCount, failCount), Toast.LENGTH_LONG).show();
                 }
             }
         });
@@ -2737,7 +2737,7 @@ public class FotosFragment extends Fragment {
                 if (btnIntroSkip != null) {
                     btnIntroSkip.setOnClickListener(v -> {
                         settingsManager.setModuleEnabled(SettingsManager.KEY_MOD_FOTOS, false);
-                        Toast.makeText(getContext(), "Fotos-Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(getContext(), getString(R.string.fotos_module_hidden), Toast.LENGTH_SHORT).show();
                         if (getActivity() instanceof com.example.unicontrol.MainActivity) {
                             ((com.example.unicontrol.MainActivity) getActivity()).refreshMenu();
                             ((com.example.unicontrol.MainActivity) getActivity()).goToNextOnboardingTab(R.id.nav_fotos);
@@ -2750,7 +2750,7 @@ public class FotosFragment extends Fragment {
                         settingsManager.setFotosLocal(etSetupLocal.getText().toString().trim());
                         settingsManager.setFotosPublic(etSetupPublic.getText().toString().trim());
                         settingsManager.setFotosApiKey(etSetupApiKey.getText().toString().trim());
-                        Toast.makeText(getContext(), "Fotos verbunden! ✅", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(getContext(), getString(R.string.fotos_connected), Toast.LENGTH_SHORT).show();
 
                         layoutFotosSetup.setVisibility(View.GONE);
                         if (layoutFotosContent != null) layoutFotosContent.setVisibility(View.VISIBLE);
@@ -2791,7 +2791,7 @@ public class FotosFragment extends Fragment {
 
                 if (globalAssetList.isEmpty() && tvPlaceholder != null) {
                     tvPlaceholder.setVisibility(View.VISIBLE);
-                    tvPlaceholder.setText("Lade Bilder aus dem Heimnetz...");
+                    tvPlaceholder.setText(getString(R.string.fotos_loading_network));
                     if (recyclerViewFotos != null) recyclerViewFotos.setVisibility(View.GONE);
                 }
 
@@ -2810,7 +2810,7 @@ public class FotosFragment extends Fragment {
             if (recyclerViewFotos != null) recyclerViewFotos.setVisibility(View.GONE);
             if (tvPlaceholder != null) {
                 tvPlaceholder.setVisibility(View.VISIBLE);
-                tvPlaceholder.setText("Bitte trage URL und API-Key in den Einstellungen ein.");
+                tvPlaceholder.setText(getString(R.string.fotos_missing_config));
             }
         }
     }

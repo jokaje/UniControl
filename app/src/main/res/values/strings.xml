@@ -1,5 +1,93 @@
 <resources>
     <string name="app_name">UniControl</string>
-    <!-- TODO: Remove or change this placeholder text -->
-    <string name="hello_blank_fragment">Hello blank fragment</string>
+
+    <!-- Modul Namen -->
+    <string name="module_home">🏠 Home Assistant</string>
+    <string name="module_fotos">☁️ Immich Fotos</string>
+    <string name="module_echo">💬 OpenClaw Echo</string>
+    <string name="module_apps">🛠️ App Entwicklung</string>
+    <string name="module_web">🌐 Web UI</string>
+
+    <!-- Settings Toasts & Infos -->
+    <string name="toast_settings_saved">Einstellungen &amp; Identität gespeichert! ✅</string>
+    <string name="toast_tracking_activated">Hintergrund-Tracking aktiviert! 📍</string>
+    <string name="toast_tracking_paused">Hintergrund-Tracking pausiert.</string>
+    <string name="toast_nfc_ready">Bereit! Halte jetzt einen unbeschriebenen NFC Tag an die Rückseite deines Handys.</string>
+    <string name="toast_backup_started">Backup gestartet! Siehe Benachrichtigungsleiste.</string>
+    <string name="toast_backup_paused">Hintergrund-Backup pausiert.</string>
+    <string name="toast_backup_auto_activated">Hintergrund-Backup aktiviert! 🚀</string>
+    <string name="toast_select_folder_first">Bitte wähle zuerst mindestens einen Ordner aus!</string>
+    <string name="toast_location_permission_needed">Bitte wähle \'Immer zulassen\', sonst klappt das Tracking im Hintergrund nicht.</string>
+    <string name="toast_storage_permission_needed">Berechtigung benötigt, um lokale Alben zu finden!</string>
+
+    <!-- Backup Bottom Sheet -->
+    <string name="backup_sheet_title">Back-Up Alben wählen</string>
+    <string name="backup_sheet_loading">Durchsuche dein Smartphone…</string>
+    <string name="backup_sheet_empty">Keine lokalen Fotos gefunden.</string>
+    <string name="backup_sheet_btn_start">🚀 Back-Up jetzt im Hintergrund starten</string>
+    <string name="backup_sheet_auto_title">Automatisches Hintergrund-Backup</string>
+    <string name="backup_sheet_auto_time_label">Tägliche Ausführung (im WLAN):</string>
+    <string name="backup_sheet_select_folders">Wähle die Ordner aus, die gesichert werden sollen:</string>
+
+    <!-- Fotos Fragment Texte -->
+    <string name="fotos_empty">Keine Bilder gefunden.</string>
+    <string name="fotos_no_albums">Du hast noch keine Alben erstellt.</string>
+    <string name="fotos_search_no_results">Keine Ergebnisse gefunden.</string>
+
+    <string name="fotos_delete_title">%1$d Foto(s) ausblenden/löschen</string>
+    <string name="fotos_delete_message">Möchtest du diese Bilder in der Cloud löschen bzw. dauerhaft auf diesem Gerät ausblenden?</string>
+    <string name="fotos_delete_confirm">Ja, weg damit</string>
+    <string name="fotos_removed_view">Aus der Ansicht entfernt!</string>
+    <string name="fotos_deleted_success">%1$d Element(e) gelöscht</string>
+    <string name="fotos_processing">Wird verarbeitet...</string>
+
+    <string name="fotos_upload_starting">%1$d Bild(er) werden hochgeladen...</string>
+    <string name="fotos_upload_success">Alle %1$d Uploads erfolgreich! ☁️➡️✅</string>
+    <string name="fotos_upload_partial">%1$d erfolgreich, %2$d fehlgeschlagen.</string>
+
+    <string name="fotos_connected">Fotos verbunden! ✅</string>
+    <string name="fotos_module_hidden">Fotos-Modul ausgeblendet.</string>
+    <string name="fotos_loading_network">Lade Bilder aus dem Heimnetz...</string>
+    <string name="fotos_missing_config">Bitte trage URL und API-Key in den Einstellungen ein.</string>
+
+    <!-- Home Fragment Texte -->
+    <string name="home_module_hidden">Home-Modul ausgeblendet.</string>
+    <string name="home_connected">Home Assistant verbunden! ✅</string>
+    <string name="home_missing_config">Bitte trage die Home Assistant URLs in den Einstellungen ein.</string>
+
+    <!-- Web UI Fragment Texte -->
+    <string name="web_module_hidden">Web UI Modul ausgeblendet.</string>
+    <string name="web_connected">Web UI verbunden! ✅</string>
+
+    <!-- Echo Fragment Texte -->
+    <string name="echo_module_hidden">Echo-Modul ausgeblendet.</string>
+    <string name="echo_connected">Echo verbunden! ✅</string>
+    <string name="echo_missing_config">Fehler: Bitte konfiguriere die Echo URLs in den Einstellungen.</string>
+    <string name="echo_connected_greeting">Verbunden! Wie kann ich helfen?</string>
+    <string name="echo_connection_error_prefix">Verbindungsfehler: %1$s</string>
+    <string name="echo_typing">KI schreibt...</string>
+    <string name="echo_recording_hint">🎤 Aufnahme läuft... (Loslassen zum Senden)</string>
+    <string name="echo_default_hint">Frag OpenClaw etwas...</string>
+    <string name="echo_recording_error">Fehler beim Start der Audio-Aufnahme</string>
+    <string name="echo_audio_sent_msg">🎤 Sprachnachricht gesendet</string>
+    <string name="echo_audio_sent_text">Ich habe dir eine Sprachnachricht gesendet.</string>
+    <string name="echo_status_connecting">Verbinde...</string>
+    <string name="echo_status_connected">Verbunden</string>
+    <string name="echo_status_error">Fehler</string>
+    <string name="echo_status_pairing">Pairing nötig</string>
+    <string name="echo_file_load_error">Fehler beim Laden der Datei.</string>
+    <string name="echo_prefix_user">Du: </string>
+    <string name="echo_prefix_agent">OpenClaw: </string>
+    <string name="echo_forward_chooser">Weiterleiten an...</string>
+
+    <!-- Allgemeine Buttons & Aktionen -->
+    <string name="action_cancel">Abbrechen</string>
+    <string name="action_search">Suchen</string>
+    <string name="action_ok">OK</string>
+    <string name="action_save">Speichern</string>
+    <string name="action_done">Fertig</string>
+    <string name="action_copy">📋 Kopieren</string>
+    <string name="action_reply">↩️ Antworten</string>
+    <string name="action_forward">↗️ Weiterleiten</string>
+    <string name="toast_message_copied">Nachricht kopiert</string>
 </resources>

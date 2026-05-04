@@ -125,7 +125,7 @@ public class EchoFragment extends Fragment {
             }
             else if ("com.example.unicontrol.ECHO_TYPING".equals(action)) {
                 if (typingMessage == null) {
-                    typingMessage = new ChatMessage("KI schreibt...", false);
+                    typingMessage = new ChatMessage(getString(R.string.echo_typing), false);
                     typingMessage.setTypingIndicator(true);
                     chatAdapter.addMessage(typingMessage);
                     chatRecyclerView.scrollToPosition(chatAdapter.getItemCount() - 1);
@@ -236,7 +236,7 @@ public class EchoFragment extends Fragment {
         // Klick auf "Nicht benötigt": Deaktiviert das Modul und geht weiter!
         btnIntroSkip.setOnClickListener(v -> {
             settingsManager.setModuleEnabled(SettingsManager.KEY_MOD_ECHO, false);
-            Toast.makeText(getContext(), "Echo-Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), getString(R.string.echo_module_hidden), Toast.LENGTH_SHORT).show();
 
             if (getActivity() instanceof MainActivity) {
                 MainActivity mainActivity = (MainActivity) getActivity();
@@ -257,7 +257,7 @@ public class EchoFragment extends Fragment {
                     etSetupPub.getText().toString().trim()
             );
 
-            Toast.makeText(getContext(), "Echo verbunden! ✅", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), getString(R.string.echo_connected), Toast.LENGTH_SHORT).show();
 
             layoutSetup.setVisibility(View.GONE);
             layoutChat.setVisibility(View.VISIBLE);
@@ -303,14 +303,14 @@ public class EchoFragment extends Fragment {
                     if (checkAudioPermission()) {
                         startRecording();
                         sendButton.setColorFilter(Color.parseColor("#FF6961"));
-                        messageEditText.setHint("🎤 Aufnahme läuft... (Loslassen zum Senden)");
+                        messageEditText.setHint(getString(R.string.echo_recording_hint));
                     }
                     return true;
                 } else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
                     if (isRecording) {
                         stopRecordingAndSend();
                         sendButton.setColorFilter(currentThemeColor);
-                        messageEditText.setHint("Frag OpenClaw etwas...");
+                        messageEditText.setHint(getString(R.string.echo_default_hint));
                     }
                     return true;
                 }
@@ -353,7 +353,7 @@ public class EchoFragment extends Fragment {
             isRecording = true;
         } catch (Exception e) {
             e.printStackTrace();
-            Toast.makeText(getContext(), "Fehler beim Start der Audio-Aufnahme", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), getString(R.string.echo_recording_error), Toast.LENGTH_SHORT).show();
             isRecording = false;
         }
     }
@@ -382,14 +382,14 @@ public class EchoFragment extends Fragment {
                     byte[] fileBytes = buffer.toByteArray();
                     String base64 = Base64.encodeToString(fileBytes, Base64.NO_WRAP);
 
-                    ChatMessage newMsg = new ChatMessage("🎤 Sprachnachricht gesendet", true, false, Uri.fromFile(audioFile).toString(), "audio/mp4");
+                    ChatMessage newMsg = new ChatMessage(getString(R.string.echo_audio_sent_msg), true, false, Uri.fromFile(audioFile).toString(), "audio/mp4");
                     chatAdapter.addMessage(newMsg);
                     chatRecyclerView.scrollToPosition(chatAdapter.getItemCount() - 1);
                     saveChatHistory();
 
                     Intent serviceIntent = new Intent(requireContext(), OpenClawService.class);
                     serviceIntent.setAction("SEND_MESSAGE");
-                    serviceIntent.putExtra("text", "Ich habe dir eine Sprachnachricht gesendet.");
+                    serviceIntent.putExtra("text", getString(R.string.echo_audio_sent_text));
                     serviceIntent.putExtra("base64", base64);
                     serviceIntent.putExtra("mimeType", "audio/mp4");
                     requireContext().startService(serviceIntent);
@@ -403,17 +403,17 @@ public class EchoFragment extends Fragment {
 
     private void handleStatusUpdate(String status) {
         int color = Color.parseColor("#FFB347");
-        String shortStatus = "Verbinde...";
+        String shortStatus = getString(R.string.echo_status_connecting);
         if (status.contains("erfolgreich") || status.contains("✅")) {
-            color = Color.parseColor("#77DD77"); shortStatus = "Verbunden";
+            color = Color.parseColor("#77DD77"); shortStatus = getString(R.string.echo_status_connected);
         } else if (status.contains("Fehler") || status.contains("❌") || status.contains("Abbruch") || status.contains("fehlgeschlagen")) {
-            color = Color.parseColor("#FF6961"); shortStatus = "Fehler";
+            color = Color.parseColor("#FF6961"); shortStatus = getString(R.string.echo_status_error);
             if (typingMessage != null) {
                 chatAdapter.removeMessage(typingMessage);
                 typingMessage = null;
             }
         } else if (status.contains("gekoppelt werden") || status.contains("⏳")) {
-            color = Color.parseColor("#FFB347"); shortStatus = "Pairing nötig";
+            color = Color.parseColor("#FFB347"); shortStatus = getString(R.string.echo_status_pairing);
         }
         updateStatusUI(color, shortStatus);
     }
@@ -562,7 +562,7 @@ public class EchoFragment extends Fragment {
                 });
             } catch (Exception e) {
                 mainHandler.post(() -> {
-                    Toast.makeText(getContext(), "Fehler beim Laden der Datei.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), getString(R.string.echo_file_load_error), Toast.LENGTH_SHORT).show();
                     clearPendingAttachment();
                 });
             }
@@ -582,9 +582,9 @@ public class EchoFragment extends Fragment {
     private void showMessageMenu(ChatMessage message, View anchorView) {
         if (getContext() == null) return;
         PopupMenu popup = new PopupMenu(getContext(), anchorView);
-        popup.getMenu().add(0, 1, 0, "📋 Kopieren");
-        popup.getMenu().add(0, 2, 1, "↩️ Antworten");
-        popup.getMenu().add(0, 3, 2, "↗️ Weiterleiten");
+        popup.getMenu().add(0, 1, 0, getString(R.string.action_copy));
+        popup.getMenu().add(0, 2, 1, getString(R.string.action_reply));
+        popup.getMenu().add(0, 3, 2, getString(R.string.action_forward));
 
         popup.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
@@ -592,10 +592,10 @@ public class EchoFragment extends Fragment {
                     ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
                     ClipData clip = ClipData.newPlainText("Nachricht", message.getText());
                     if (clipboard != null) clipboard.setPrimaryClip(clip);
-                    Toast.makeText(getContext(), "Nachricht kopiert", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), getString(R.string.toast_message_copied), Toast.LENGTH_SHORT).show();
                     return true;
                 case 2:
-                    String prefix = message.isUser() ? "Du: " : "OpenClaw: ";
+                    String prefix = message.isUser() ? getString(R.string.echo_prefix_user) : getString(R.string.echo_prefix_agent);
                     String quote = "> " + prefix + message.getText().replace("\n", "\n> ") + "\n\n";
                     messageEditText.setText(quote);
                     messageEditText.setSelection(quote.length());
@@ -606,7 +606,7 @@ public class EchoFragment extends Fragment {
                     sendIntent.setAction(Intent.ACTION_SEND);
                     sendIntent.putExtra(Intent.EXTRA_TEXT, message.getText());
                     sendIntent.setType("text/plain");
-                    startActivity(Intent.createChooser(sendIntent, "Weiterleiten an..."));
+                    startActivity(Intent.createChooser(sendIntent, getString(R.string.echo_forward_chooser)));
                     return true;
             }
             return false;

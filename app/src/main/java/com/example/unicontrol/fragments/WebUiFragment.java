@@ -152,7 +152,7 @@ public class WebUiFragment extends Fragment {
             if (btnIntroSkip != null) {
                 btnIntroSkip.setOnClickListener(v -> {
                     settingsManager.setModuleEnabled(SettingsManager.KEY_MOD_WEB, false);
-                    Toast.makeText(getContext(), "Web UI Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), getString(R.string.web_module_hidden), Toast.LENGTH_SHORT).show();
 
                     if (getActivity() instanceof MainActivity) {
                         ((MainActivity) getActivity()).refreshMenu();
@@ -167,7 +167,7 @@ public class WebUiFragment extends Fragment {
                     settingsManager.setWebLocal(etSetupLocal.getText().toString().trim());
                     settingsManager.setWebPublic(etSetupPublic.getText().toString().trim());
 
-                    Toast.makeText(getContext(), "Web UI verbunden! ✅", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), getString(R.string.web_connected), Toast.LENGTH_SHORT).show();
 
                     layoutWebSetup.setVisibility(View.GONE);
                     layoutWebContent.setVisibility(View.VISIBLE);
