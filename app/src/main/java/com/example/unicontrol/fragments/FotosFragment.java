@@ -4,7 +4,6 @@ import android.content.ClipData;
 import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -70,18 +69,20 @@ import com.example.unicontrol.models.ImmichPerson;
 import com.example.unicontrol.models.requests.ImmichRequests;
 import com.example.unicontrol.network.ImmichApi;
 import com.example.unicontrol.network.RetrofitClient;
+import com.example.unicontrol.utils.CryptoUtils;
 import com.example.unicontrol.utils.NetworkUtils;
+import com.example.unicontrol.utils.SettingsManager;
 import com.example.unicontrol.viewmodels.FotosViewModel;
 import com.example.unicontrol.viewmodels.SharedViewModel;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.textfield.TextInputLayout;
-import com.google.common.reflect.TypeToken;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.reflect.TypeToken;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -100,18 +101,13 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.Executors;
 
-import okhttp3.MediaType;
-import okhttp3.MultipartBody;
-import okhttp3.RequestBody;
 import okhttp3.ResponseBody;
-import okio.BufferedSink;
-import okio.Okio;
-import okio.Source;
 import retrofit2.Response;
 
 public class FotosFragment extends Fragment {
 
     private FotosViewModel fotosViewModel;
+    private SettingsManager settingsManager; // NEU
 
     private SwipeRefreshLayout swipeRefreshLayout;
     private RecyclerView recyclerViewFotos;
@@ -203,9 +199,9 @@ public class FotosFragment extends Fragment {
 
     private int getThemeColor() {
         if (getContext() == null) return Color.parseColor("#F49AC2");
-        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String colorStr = prefs.getString(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2");
+        if (settingsManager == null) settingsManager = SettingsManager.getInstance(requireContext());
 
+        String colorStr = settingsManager.getColorFotos();
         if (colorStr != null && !colorStr.startsWith("#")) {
             colorStr = "#" + colorStr;
         }
@@ -250,7 +246,6 @@ public class FotosFragment extends Fragment {
         return drawable;
     }
 
-    // --- NEU: Helper-Methode für den korrekten sichtbaren Adapter ---
     private FotosAdapter getActiveAdapter() {
         if ("Suche".equals(activeTab) && recyclerViewSearch != null && recyclerViewSearch.getVisibility() == View.VISIBLE) {
             if (recyclerViewSearch.getAdapter() instanceof FotosAdapter) {
@@ -275,6 +270,7 @@ public class FotosFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        settingsManager = SettingsManager.getInstance(requireContext());
         fotosViewModel = new ViewModelProvider(this).get(FotosViewModel.class);
         setupObservers();
 
@@ -357,7 +353,6 @@ public class FotosFragment extends Fragment {
             btnSelectionUploadLocal.setLayoutParams(paramsUpload);
             btnSelectionUploadLocal.setVisibility(View.GONE);
 
-            // FIX: Benutze Active Adapter!
             btnSelectionUploadLocal.setOnClickListener(v -> {
                 FotosAdapter adapter = getActiveAdapter();
                 if (adapter != null) uploadMultipleAssets(adapter.getSelectedAssets());
@@ -365,7 +360,6 @@ public class FotosFragment extends Fragment {
             ((LinearLayout) layoutSelectionBottomBar).addView(btnSelectionUploadLocal);
         }
 
-        // FIX: Benutze Active Adapter für alle Action Bar Buttons!
         if (btnCloseSelection != null) btnCloseSelection.setOnClickListener(v -> {
             clearSelectionUI();
             refreshVisibleGrids();
@@ -617,9 +611,9 @@ public class FotosFragment extends Fragment {
 
     private void loadLocalAssetsAsync() {
         if (getContext() == null) return;
-        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        Set<String> bucketIds = prefs.getStringSet(SettingsFragment.KEY_BACKUP_ALBUMS, new HashSet<>());
-        Set<String> blacklist = prefs.getStringSet("blacklisted_local_assets", new HashSet<>());
+
+        Set<String> bucketIds = settingsManager.getBackupAlbums();
+        Set<String> blacklist = settingsManager.getPrefs().getStringSet("blacklisted_local_assets", new HashSet<>());
 
         fotosViewModel.loadLocalAssetsAsync(getContext(), currentApiUrl, currentApiKey, bucketIds, blacklist, new FotosViewModel.LocalScanCallback() {
             @Override
@@ -698,14 +692,13 @@ public class FotosFragment extends Fragment {
                 .setPositiveButton("Ja, weg damit", (dialog, which) -> {
                     Toast.makeText(getContext(), "Wird verarbeitet...", Toast.LENGTH_SHORT).show();
 
-                    SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-                    Set<String> blacklist = new HashSet<>(prefs.getStringSet("blacklisted_local_assets", new HashSet<>()));
+                    Set<String> blacklist = new HashSet<>(settingsManager.getPrefs().getStringSet("blacklisted_local_assets", new HashSet<>()));
 
                     if (!localOnlyAssetsToBlacklist.isEmpty()) {
                         for (ImmichAsset a : localOnlyAssetsToBlacklist) {
                             if (a.deviceAssetId != null) blacklist.add(a.deviceAssetId);
                         }
-                        prefs.edit().putStringSet("blacklisted_local_assets", blacklist).apply();
+                        settingsManager.getPrefs().edit().putStringSet("blacklisted_local_assets", blacklist).apply();
                         localMediaCache.removeAll(localOnlyAssetsToBlacklist);
 
                         if (cloudAssetIdsToDelete.isEmpty()) {
@@ -726,7 +719,7 @@ public class FotosFragment extends Fragment {
                                 for (ImmichAsset a : deletedAssets) {
                                     if (a.deviceAssetId != null) blacklist.add(a.deviceAssetId);
                                 }
-                                prefs.edit().putStringSet("blacklisted_local_assets", blacklist).apply();
+                                settingsManager.getPrefs().edit().putStringSet("blacklisted_local_assets", blacklist).apply();
 
                                 globalAssetList.removeAll(deletedAssets);
                                 if (lastSearchResults != null) lastSearchResults.removeAll(deletedAssets);
@@ -830,8 +823,7 @@ public class FotosFragment extends Fragment {
         fotosViewModel.archiveAssets(currentApiUrl, currentApiKey, selected, toArchive, new FotosViewModel.ActionCallback() {
             @Override
             public void onSuccess() {
-                SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-                Set<String> blacklist = new HashSet<>(prefs.getStringSet("blacklisted_local_assets", new HashSet<>()));
+                Set<String> blacklist = new HashSet<>(settingsManager.getPrefs().getStringSet("blacklisted_local_assets", new HashSet<>()));
 
                 for (ImmichAsset asset : selected) {
                     asset.isArchived = toArchive;
@@ -850,7 +842,7 @@ public class FotosFragment extends Fragment {
                         }
                     }
                 }
-                prefs.edit().putStringSet("blacklisted_local_assets", blacklist).apply();
+                settingsManager.getPrefs().edit().putStringSet("blacklisted_local_assets", blacklist).apply();
 
                 clearSelectionUI();
                 refreshVisibleGrids();
@@ -2076,8 +2068,7 @@ public class FotosFragment extends Fragment {
 
     private void promptForLockedFolder(boolean isViewing, boolean isUnlocking, List<ImmichAsset> multipleAssets) {
         if (getContext() == null) return;
-        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String savedPin = prefs.getString("locked_folder_pin", "");
+        String savedPin = settingsManager.getPrefs().getString("locked_folder_pin", "");
 
         AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
         builder.setTitle(savedPin.isEmpty() ? "Tresor einrichten" : "Tresor entsperren");
@@ -2092,7 +2083,7 @@ public class FotosFragment extends Fragment {
             String enteredPin = input.getText().toString();
             if (savedPin.isEmpty()) {
                 if (enteredPin.length() >= 4) {
-                    prefs.edit().putString("locked_folder_pin", enteredPin).apply();
+                    settingsManager.getPrefs().edit().putString("locked_folder_pin", enteredPin).apply();
                     Toast.makeText(getContext(), "PIN gespeichert!", Toast.LENGTH_SHORT).show();
                     if (isViewing) {
                         ImmichRequests.SearchMetadata req = new ImmichRequests.SearchMetadata();
@@ -2302,8 +2293,9 @@ public class FotosFragment extends Fragment {
 
         Toast.makeText(getContext(), locals.size() + (locals.size() == 1 ? " Bild wird hochgeladen..." : " Bilder werden hochgeladen..."), Toast.LENGTH_LONG).show();
 
-        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, "android-app");
+        CryptoUtils cryptoUtils = new CryptoUtils(requireContext());
+        String deviceId = cryptoUtils.getDeviceId();
+        if (deviceId == null || deviceId.isEmpty()) deviceId = "android-app";
 
         fotosViewModel.uploadAssets(getContext(), currentApiUrl, currentApiKey, deviceId, locals, new FotosViewModel.UploadCallback() {
             @Override
@@ -2717,11 +2709,11 @@ public class FotosFragment extends Fragment {
 
     private void loadAppropriateUrlAndKey() {
         if (getContext() == null) return;
-        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
-        String localUrl = prefs.getString(SettingsFragment.KEY_FOTOS_LOCAL, "");
-        String publicUrl = prefs.getString(SettingsFragment.KEY_FOTOS_PUBLIC, "");
-        String apiKey = prefs.getString(SettingsFragment.KEY_FOTOS_API_KEY, "");
+
+        String savedSsid = settingsManager.getWifiSsid();
+        String localUrl = settingsManager.getFotosLocal();
+        String publicUrl = settingsManager.getFotosPublic();
+        String apiKey = settingsManager.getFotosApiKey();
 
         if (localUrl.isEmpty() || apiKey.isEmpty()) {
             if (layoutFotosContent != null) layoutFotosContent.setVisibility(View.GONE);
@@ -2744,7 +2736,7 @@ public class FotosFragment extends Fragment {
 
                 if (btnIntroSkip != null) {
                     btnIntroSkip.setOnClickListener(v -> {
-                        prefs.edit().putBoolean(SettingsFragment.KEY_MOD_FOTOS, false).apply();
+                        settingsManager.setModuleEnabled(SettingsManager.KEY_MOD_FOTOS, false);
                         Toast.makeText(getContext(), "Fotos-Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
                         if (getActivity() instanceof com.example.unicontrol.MainActivity) {
                             ((com.example.unicontrol.MainActivity) getActivity()).refreshMenu();
@@ -2755,11 +2747,9 @@ public class FotosFragment extends Fragment {
 
                 if (btnSetupSave != null) {
                     btnSetupSave.setOnClickListener(v -> {
-                        prefs.edit()
-                                .putString(SettingsFragment.KEY_FOTOS_LOCAL, etSetupLocal.getText().toString().trim())
-                                .putString(SettingsFragment.KEY_FOTOS_PUBLIC, etSetupPublic.getText().toString().trim())
-                                .putString(SettingsFragment.KEY_FOTOS_API_KEY, etSetupApiKey.getText().toString().trim())
-                                .apply();
+                        settingsManager.setFotosLocal(etSetupLocal.getText().toString().trim());
+                        settingsManager.setFotosPublic(etSetupPublic.getText().toString().trim());
+                        settingsManager.setFotosApiKey(etSetupApiKey.getText().toString().trim());
                         Toast.makeText(getContext(), "Fotos verbunden! ✅", Toast.LENGTH_SHORT).show();
 
                         layoutFotosSetup.setVisibility(View.GONE);
@@ -2783,9 +2773,13 @@ public class FotosFragment extends Fragment {
         String currentSsid = NetworkUtils.getCurrentSsid(getContext());
         String targetUrl = "";
 
-        if (!savedSsid.isEmpty() && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) targetUrl = formatUrl(localUrl, true);
-        else if (!publicUrl.isEmpty()) targetUrl = formatUrl(publicUrl, false);
-        else if (!localUrl.isEmpty()) targetUrl = formatUrl(localUrl, true);
+        if (!savedSsid.isEmpty() && currentSsid != null && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) {
+            targetUrl = formatUrl(localUrl, true);
+        } else if (!publicUrl.isEmpty()) {
+            targetUrl = formatUrl(publicUrl, false);
+        } else if (!localUrl.isEmpty()) {
+            targetUrl = formatUrl(localUrl, true);
+        }
 
         if (!targetUrl.isEmpty() && !apiKey.isEmpty()) {
             boolean urlChanged = !targetUrl.equals(currentApiUrl) || !apiKey.equals(currentApiKey);
@@ -2824,8 +2818,6 @@ public class FotosFragment extends Fragment {
     private void processAndDisplayAssets(List<ImmichAsset> rawListToProcess, String baseUrl, String apiKey, RecyclerView targetRecyclerView) {
         if (getContext() == null || rawListToProcess == null || targetRecyclerView == null) return;
 
-        // SICHERHEITSSPERRE: Wenn der Nutzer gerade in DIESER Liste Elemente ausgewählt hat,
-        // dürfen wir den Adapter nicht neu erstellen, da sonst das Aktionsmenü ins Leere zeigt!
         if (targetRecyclerView.getAdapter() instanceof FotosAdapter) {
             FotosAdapter oldAdapter = (FotosAdapter) targetRecyclerView.getAdapter();
             List<ImmichAsset> currentlySelected = oldAdapter.getSelectedAssets();

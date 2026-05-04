@@ -3,7 +3,6 @@ package com.example.unicontrol.fragments;
 import android.Manifest;
 import android.app.TimePickerDialog;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
@@ -65,46 +64,8 @@ import java.util.concurrent.TimeUnit;
 
 public class SettingsFragment extends Fragment {
 
-    public static final String PREFS_NAME = "UniControlPrefs";
-
-    // Keys für das Ein- und Ausblenden der Module
-    public static final String KEY_MOD_HOME = "mod_home_enabled";
-    public static final String KEY_MOD_FOTOS = "mod_fotos_enabled";
-    public static final String KEY_MOD_ECHO = "mod_echo_enabled";
-    public static final String KEY_MOD_WEB = "mod_web_enabled";
-    public static final String KEY_MOD_APPS = "mod_apps_enabled";
-    public static final String KEY_MOD_ORDER = "mod_order";
-
-    public static final String KEY_WIFI_SSID = "wifi_ssid";
-    public static final String KEY_ECHO_LOCAL = "echo_local";
-    public static final String KEY_ECHO_PUBLIC = "echo_public";
-    public static final String KEY_WEB_LOCAL = "web_local";
-    public static final String KEY_WEB_PUBLIC = "web_public";
-    public static final String KEY_HOME_LOCAL = "home_local";
-    public static final String KEY_HOME_PUBLIC = "home_public";
-    public static final String KEY_FOTOS_LOCAL = "fotos_local";
-    public static final String KEY_FOTOS_PUBLIC = "fotos_public";
-    public static final String KEY_FOTOS_API_KEY = "fotos_api_key";
-    public static final String KEY_COLOR_ECHO = "color_echo";
-    public static final String KEY_COLOR_WEB = "color_web";
-    public static final String KEY_COLOR_HOME = "color_home";
-    public static final String KEY_COLOR_FOTOS = "color_fotos";
-    public static final String KEY_COLOR_SETTINGS = "color_settings";
-    public static final String KEY_BACKUP_ALBUMS = "backup_albums_set";
-    public static final String KEY_DEVICE_ID = "device_id_uuid";
-
-    // OpenClaw Keys
-    public static final String KEY_OPENCLAW_PASSWORD = "openclaw_password";
-    public static final String KEY_OPENCLAW_DEVICE_TOKEN = "openclaw_device_token";
-
-    // Auto-Backup Keys
-    public static final String KEY_AUTO_BACKUP_ENABLED = "auto_backup_enabled";
-    public static final String KEY_AUTO_BACKUP_HOUR = "auto_backup_hour";
-    public static final String KEY_AUTO_BACKUP_MINUTE = "auto_backup_minute";
-
-    // Home Assistant Tracker Keys
-    public static final String KEY_HOME_TOKEN = LocationWorker.KEY_HOME_TOKEN;
-    public static final String KEY_LOCATION_TRACKING_ENABLED = "location_tracking_enabled";
+    // Behalten wir nur zur Sicherheit als Weiterleitung, falls es noch irgendwo referenziert wird
+    public static final String PREFS_NAME = SettingsManager.PREF_NAME;
 
     private static final int REQUEST_CODE_PERMISSIONS = 1002;
     private static final int REQUEST_CODE_LOCATION = 1004;

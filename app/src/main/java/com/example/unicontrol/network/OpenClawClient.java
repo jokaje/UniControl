@@ -1,15 +1,14 @@
 package com.example.unicontrol.network;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
 
-import com.example.unicontrol.fragments.SettingsFragment;
 import com.example.unicontrol.utils.CryptoUtils;
+import com.example.unicontrol.utils.SettingsManager;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -29,7 +28,7 @@ public class OpenClawClient extends WebSocketListener {
     private final Context context;
     private final CryptoUtils cryptoUtils;
     private final Gson gson;
-    private final SharedPreferences settingsPrefs;
+    private final SettingsManager settingsManager;
 
     private WebSocket webSocket;
     private OkHttpClient client;
@@ -118,7 +117,7 @@ public class OpenClawClient extends WebSocketListener {
         this.context = context;
         this.cryptoUtils = new CryptoUtils(context);
         this.gson = new Gson();
-        this.settingsPrefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+        this.settingsManager = SettingsManager.getInstance(context);
 
         // Ping-Intervall hinzugefügt (Keep-Alive für den Hintergrund, verhindert Timeout)
         this.client = new OkHttpClient.Builder()
@@ -127,9 +126,9 @@ public class OpenClawClient extends WebSocketListener {
     }
 
     private String getSmartUrl() {
-        String homeSsid = settingsPrefs.getString(SettingsFragment.KEY_WIFI_SSID, "").trim();
-        String localUrl = settingsPrefs.getString(SettingsFragment.KEY_ECHO_LOCAL, "").trim();
-        String publicUrl = settingsPrefs.getString(SettingsFragment.KEY_ECHO_PUBLIC, "").trim();
+        String homeSsid = settingsManager.getWifiSsid().trim();
+        String localUrl = settingsManager.getEchoLocal().trim();
+        String publicUrl = settingsManager.getEchoPublic().trim();
 
         boolean isAtHome = false;
 
@@ -225,7 +224,7 @@ public class OpenClawClient extends WebSocketListener {
                     if (payload.has("server") || payload.has("deviceToken")) {
                         if (chatListener != null) chatListener.onConnectionStatusChanged("Authentifizierung erfolgreich! ✅");
                         if (payload.has("deviceToken")) {
-                            settingsPrefs.edit().putString(SettingsFragment.KEY_OPENCLAW_DEVICE_TOKEN, payload.get("deviceToken").getAsString()).apply();
+                            settingsManager.setDeviceToken(payload.get("deviceToken").getAsString());
                         }
                     }
                     else if (payload.has("runId") && payload.has("status") && "started".equals(payload.get("status").getAsString())) {
@@ -238,10 +237,10 @@ public class OpenClawClient extends WebSocketListener {
                     String reason = details.has("reason") ? details.get("reason").getAsString() : "";
 
                     if ("device-id-mismatch".equals(reason)) {
-                        settingsPrefs.edit().remove(SettingsFragment.KEY_OPENCLAW_DEVICE_TOKEN).apply();
+                        settingsManager.setDeviceToken(""); // Reset Device Token
                         if (chatListener != null) chatListener.onConnectionStatusChanged("❌ Mismatch Fehler!\nDer Token wurde zurückgesetzt.");
                     } else if ("pairing-required".equals(reason) || "device-not-approved".equals(reason) || errorMsg.contains("pair") || errorMsg.contains("approve")) {
-                        String deviceId = settingsPrefs.getString(SettingsFragment.KEY_DEVICE_ID, cryptoUtils.getDeviceId());
+                        String deviceId = cryptoUtils.getDeviceId();
                         if (chatListener != null) chatListener.onConnectionStatusChanged("⏳ Gerät muss gekoppelt werden!\n\nFühre auf deinem Server aus:\nopenclaw devices approve " + deviceId);
                     } else {
                         if (chatListener != null) chatListener.onConnectionStatusChanged("❌ Server-Meldung: " + errorMsg);
@@ -279,8 +278,8 @@ public class OpenClawClient extends WebSocketListener {
 
     private void handleConnectChallenge(String nonce) {
         String deviceId = cryptoUtils.getDeviceId();
-        String password = settingsPrefs.getString(SettingsFragment.KEY_OPENCLAW_PASSWORD, "");
-        String deviceToken = settingsPrefs.getString(SettingsFragment.KEY_OPENCLAW_DEVICE_TOKEN, "");
+        String password = settingsManager.getOpenClawPassword();
+        String deviceToken = settingsManager.getDeviceToken();
         if (deviceToken == null) deviceToken = "";
 
         long signedAt = System.currentTimeMillis();
@@ -321,7 +320,6 @@ public class OpenClawClient extends WebSocketListener {
         params.addProperty("minProtocol", 3);
         params.addProperty("maxProtocol", 3);
 
-        // HIER IST DER FIX: role und scopes werden dem params-Objekt hinzugefügt!
         params.addProperty("role", role);
 
         JsonArray scopesArray = new JsonArray();

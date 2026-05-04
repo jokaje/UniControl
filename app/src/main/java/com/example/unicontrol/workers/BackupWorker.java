@@ -5,7 +5,6 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.ContentUris;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -25,8 +24,9 @@ import androidx.work.WorkManager;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
-import com.example.unicontrol.fragments.SettingsFragment;
+import com.example.unicontrol.utils.CryptoUtils;
 import com.example.unicontrol.utils.NetworkUtils;
+import com.example.unicontrol.utils.SettingsManager;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -359,15 +359,15 @@ public class BackupWorker extends Worker {
         }
 
         Context context = getApplicationContext();
-        SharedPreferences prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+        SettingsManager settingsManager = SettingsManager.getInstance(context);
 
         boolean isManual = getInputData().getBoolean("is_manual", false);
 
-        if (!isManual && !prefs.getBoolean(SettingsFragment.KEY_AUTO_BACKUP_ENABLED, false)) {
+        if (!isManual && !settingsManager.isAutoBackupEnabled()) {
             return Result.success();
         }
 
-        Set<String> bucketIds = prefs.getStringSet(SettingsFragment.KEY_BACKUP_ALBUMS, new HashSet<>());
+        Set<String> bucketIds = settingsManager.getBackupAlbums();
         if (bucketIds.isEmpty()) {
             if (isManual) showToast("Fehler: Keine Alben für das Backup ausgewählt!");
             return Result.success();
@@ -376,17 +376,21 @@ public class BackupWorker extends Worker {
         try {
             updateNotification("Bereite Backup vor...");
 
-            String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
-            String localUrl = prefs.getString(SettingsFragment.KEY_FOTOS_LOCAL, "");
-            String publicUrl = prefs.getString(SettingsFragment.KEY_FOTOS_PUBLIC, "");
-            String apiKey = prefs.getString(SettingsFragment.KEY_FOTOS_API_KEY, "");
-            String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, UUID.randomUUID().toString());
+            String savedSsid = settingsManager.getWifiSsid();
+            String localUrl = settingsManager.getFotosLocal();
+            String publicUrl = settingsManager.getFotosPublic();
+            String apiKey = settingsManager.getFotosApiKey();
+
+            CryptoUtils cryptoUtils = new CryptoUtils(context);
+            String deviceId = cryptoUtils.getDeviceId();
+            if (deviceId == null || deviceId.isEmpty()) deviceId = UUID.randomUUID().toString();
+
             String currentSsid = NetworkUtils.getCurrentSsid(context);
 
-            Set<String> blacklist = prefs.getStringSet("blacklisted_local_assets", new HashSet<>());
+            Set<String> blacklist = settingsManager.getPrefs().getStringSet("blacklisted_local_assets", new HashSet<>());
 
             String targetUrl = "";
-            if (!savedSsid.isEmpty() && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) {
+            if (!savedSsid.isEmpty() && currentSsid != null && currentSsid.equals(savedSsid) && !localUrl.isEmpty()) {
                 targetUrl = formatUrl(localUrl, true);
             } else if (!publicUrl.isEmpty()) {
                 targetUrl = formatUrl(publicUrl, false);
@@ -498,7 +502,7 @@ public class BackupWorker extends Worker {
             clearNotification();
 
             if (!isManual) {
-                scheduleNextBackup(context, prefs);
+                scheduleNextBackup(context, settingsManager);
             }
         }
     }
@@ -509,11 +513,11 @@ public class BackupWorker extends Worker {
         });
     }
 
-    private void scheduleNextBackup(Context context, SharedPreferences prefs) {
-        if (!prefs.getBoolean(SettingsFragment.KEY_AUTO_BACKUP_ENABLED, false)) return;
+    private void scheduleNextBackup(Context context, SettingsManager settingsManager) {
+        if (!settingsManager.isAutoBackupEnabled()) return;
 
-        int hour = prefs.getInt(SettingsFragment.KEY_AUTO_BACKUP_HOUR, 2);
-        int minute = prefs.getInt(SettingsFragment.KEY_AUTO_BACKUP_MINUTE, 0);
+        int hour = settingsManager.getAutoBackupHour();
+        int minute = settingsManager.getAutoBackupMinute();
 
         Calendar currentDate = Calendar.getInstance();
         Calendar dueDate = Calendar.getInstance();

@@ -1,7 +1,6 @@
 package com.example.unicontrol.adapters;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.view.LayoutInflater;
@@ -18,9 +17,9 @@ import com.bumptech.glide.Glide;
 import com.bumptech.glide.load.model.GlideUrl;
 import com.bumptech.glide.load.model.LazyHeaders;
 import com.example.unicontrol.R;
-import com.example.unicontrol.fragments.SettingsFragment;
 import com.example.unicontrol.models.GalleryItem;
 import com.example.unicontrol.models.ImmichAsset;
+import com.example.unicontrol.utils.SettingsManager;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -112,9 +111,9 @@ public class FotosAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
         GalleryItem item = items.get(position);
 
-        // --- NEU: Intelligente Farbermittlung (Luminanz) für die Datums-Header ---
-        SharedPreferences prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String colorStr = prefs.getString(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2");
+        // --- SAUBERER ZUGRIFF: Über den SettingsManager ---
+        SettingsManager settingsManager = SettingsManager.getInstance(context);
+        String colorStr = settingsManager.getColorFotos();
         int themeColor = Color.parseColor("#F49AC2");
         try {
             themeColor = Color.parseColor(colorStr);

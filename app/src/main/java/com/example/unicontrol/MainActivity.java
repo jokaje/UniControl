@@ -7,7 +7,6 @@ import android.animation.ValueAnimator;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
@@ -35,9 +34,6 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.ColorUtils;
-import androidx.core.view.WindowCompat;
-import androidx.core.view.WindowInsetsCompat;
-import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 import androidx.work.WorkInfo;
@@ -50,7 +46,9 @@ import com.example.unicontrol.fragments.FotosFragment;
 import com.example.unicontrol.fragments.HomeFragment;
 import com.example.unicontrol.fragments.SettingsFragment;
 import com.example.unicontrol.fragments.WebUiFragment;
+import com.example.unicontrol.utils.CryptoUtils;
 import com.example.unicontrol.utils.NetworkUtils;
+import com.example.unicontrol.utils.SettingsManager;
 
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -79,6 +77,8 @@ public class MainActivity extends AppCompatActivity {
     private NfcAdapter nfcAdapter;
     private PendingIntent pendingIntent;
 
+    private SettingsManager settingsManager;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -87,15 +87,11 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         requestLocationPermission();
 
+        settingsManager = SettingsManager.getInstance(this);
+
         BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
 
-        SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, MODE_PRIVATE);
-        String defaultOrder = SettingsFragment.KEY_MOD_HOME + "," +
-                SettingsFragment.KEY_MOD_FOTOS + "," +
-                SettingsFragment.KEY_MOD_ECHO + "," +
-                SettingsFragment.KEY_MOD_APPS + "," +
-                SettingsFragment.KEY_MOD_WEB;
-        String orderString = prefs.getString(SettingsFragment.KEY_MOD_ORDER, defaultOrder);
+        String orderString = settingsManager.getModuleOrder();
         String[] keys = orderString.split(",");
 
         if (savedInstanceState == null) {
@@ -116,15 +112,15 @@ public class MainActivity extends AppCompatActivity {
             // Intelligenter Start: Wähle das erste Modul in deiner gespeicherten Liste, das aktiviert ist!
             int startId = R.id.nav_settings;
             Fragment startFrag = settingsFragment;
-            currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_SETTINGS, "#EAEAEA");
+            currentColor = parseColorSafe(settingsManager.getColorSettings(), "#EAEAEA");
 
             for (String key : keys) {
-                if (prefs.getBoolean(key, true)) {
-                    if (SettingsFragment.KEY_MOD_HOME.equals(key)) { startId = R.id.nav_home; startFrag = homeFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_HOME, "#B2D3C2"); break; }
-                    else if (SettingsFragment.KEY_MOD_FOTOS.equals(key)) { startId = R.id.nav_fotos; startFrag = fotosFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2"); break; }
-                    else if (SettingsFragment.KEY_MOD_ECHO.equals(key)) { startId = R.id.nav_echo; startFrag = echoFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF"); break; }
-                    else if (SettingsFragment.KEY_MOD_APPS.equals(key)) { startId = R.id.nav_apps; startFrag = appsFragment; currentColor = getDynamicColor(AppsFragment.KEY_COLOR_APPS, "#D3B8E8"); break; }
-                    else if (SettingsFragment.KEY_MOD_WEB.equals(key)) { startId = R.id.nav_web; startFrag = webUiFragment; currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_WEB, "#FDFD96"); break; }
+                if (settingsManager.isModuleEnabled(key)) {
+                    if (SettingsManager.KEY_MOD_HOME.equals(key)) { startId = R.id.nav_home; startFrag = homeFragment; currentColor = parseColorSafe(settingsManager.getColorHome(), "#B2D3C2"); break; }
+                    else if (SettingsManager.KEY_MOD_FOTOS.equals(key)) { startId = R.id.nav_fotos; startFrag = fotosFragment; currentColor = parseColorSafe(settingsManager.getColorFotos(), "#F49AC2"); break; }
+                    else if (SettingsManager.KEY_MOD_ECHO.equals(key)) { startId = R.id.nav_echo; startFrag = echoFragment; currentColor = parseColorSafe(settingsManager.getColorEcho(), "#AEC6CF"); break; }
+                    else if (SettingsManager.KEY_MOD_APPS.equals(key)) { startId = R.id.nav_apps; startFrag = appsFragment; currentColor = parseColorSafe(settingsManager.getColorApps(), "#D3B8E8"); break; }
+                    else if (SettingsManager.KEY_MOD_WEB.equals(key)) { startId = R.id.nav_web; startFrag = webUiFragment; currentColor = parseColorSafe(settingsManager.getColorWeb(), "#FDFD96"); break; }
                 }
             }
 
@@ -150,12 +146,12 @@ public class MainActivity extends AppCompatActivity {
             else if (settingsFragment != null && !settingsFragment.isHidden()) activeFragment = settingsFragment;
             else activeFragment = homeFragment;
 
-            currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_SETTINGS, "#EAEAEA"); // Fallback
-            if (activeFragment == homeFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_HOME, "#B2D3C2");
-            else if (activeFragment == fotosFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2");
-            else if (activeFragment == echoFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF");
-            else if (activeFragment == appsFragment) currentColor = getDynamicColor(AppsFragment.KEY_COLOR_APPS, "#D3B8E8");
-            else if (activeFragment == webUiFragment) currentColor = getDynamicColor(SettingsFragment.KEY_COLOR_WEB, "#FDFD96");
+            currentColor = parseColorSafe(settingsManager.getColorSettings(), "#EAEAEA"); // Fallback
+            if (activeFragment == homeFragment) currentColor = parseColorSafe(settingsManager.getColorHome(), "#B2D3C2");
+            else if (activeFragment == fotosFragment) currentColor = parseColorSafe(settingsManager.getColorFotos(), "#F49AC2");
+            else if (activeFragment == echoFragment) currentColor = parseColorSafe(settingsManager.getColorEcho(), "#AEC6CF");
+            else if (activeFragment == appsFragment) currentColor = parseColorSafe(settingsManager.getColorApps(), "#D3B8E8");
+            else if (activeFragment == webUiFragment) currentColor = parseColorSafe(settingsManager.getColorWeb(), "#FDFD96");
 
             refreshMenu();
         }
@@ -171,22 +167,22 @@ public class MainActivity extends AppCompatActivity {
 
             if (itemId == R.id.nav_echo) {
                 newFragment = echoFragment;
-                targetColor = getDynamicColor(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF");
+                targetColor = parseColorSafe(settingsManager.getColorEcho(), "#AEC6CF");
             } else if (itemId == R.id.nav_apps) {
                 newFragment = appsFragment;
-                targetColor = getDynamicColor(AppsFragment.KEY_COLOR_APPS, "#D3B8E8");
+                targetColor = parseColorSafe(settingsManager.getColorApps(), "#D3B8E8");
             } else if (itemId == R.id.nav_web) {
                 newFragment = webUiFragment;
-                targetColor = getDynamicColor(SettingsFragment.KEY_COLOR_WEB, "#FDFD96");
+                targetColor = parseColorSafe(settingsManager.getColorWeb(), "#FDFD96");
             } else if (itemId == R.id.nav_home) {
                 newFragment = homeFragment;
-                targetColor = getDynamicColor(SettingsFragment.KEY_COLOR_HOME, "#B2D3C2");
+                targetColor = parseColorSafe(settingsManager.getColorHome(), "#B2D3C2");
             } else if (itemId == R.id.nav_fotos) {
                 newFragment = fotosFragment;
-                targetColor = getDynamicColor(SettingsFragment.KEY_COLOR_FOTOS, "#F49AC2");
+                targetColor = parseColorSafe(settingsManager.getColorFotos(), "#F49AC2");
             } else if (itemId == R.id.nav_settings) {
                 newFragment = settingsFragment;
-                targetColor = getDynamicColor(SettingsFragment.KEY_COLOR_SETTINGS, "#EAEAEA");
+                targetColor = parseColorSafe(settingsManager.getColorSettings(), "#EAEAEA");
             }
 
             if (newFragment != null && newFragment != activeFragment) {
@@ -250,14 +246,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void refreshMenu() {
-        SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, MODE_PRIVATE);
+        if (settingsManager == null) settingsManager = SettingsManager.getInstance(this);
 
-        String defaultOrder = SettingsFragment.KEY_MOD_HOME + "," +
-                SettingsFragment.KEY_MOD_FOTOS + "," +
-                SettingsFragment.KEY_MOD_ECHO + "," +
-                SettingsFragment.KEY_MOD_APPS + "," +
-                SettingsFragment.KEY_MOD_WEB;
-        String orderString = prefs.getString(SettingsFragment.KEY_MOD_ORDER, defaultOrder);
+        String orderString = settingsManager.getModuleOrder();
         String[] keys = orderString.split(",");
 
         BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
@@ -267,16 +258,16 @@ public class MainActivity extends AppCompatActivity {
 
             // Füge die Tabs in der korrekten Reihenfolge wieder ein
             for (String key : keys) {
-                if (prefs.getBoolean(key, true)) {
-                    if (SettingsFragment.KEY_MOD_HOME.equals(key)) {
+                if (settingsManager.isModuleEnabled(key)) {
+                    if (SettingsManager.KEY_MOD_HOME.equals(key)) {
                         bottomNav.getMenu().add(Menu.NONE, R.id.nav_home, Menu.NONE, "Home").setIcon(R.drawable.ic_home);
-                    } else if (SettingsFragment.KEY_MOD_FOTOS.equals(key)) {
+                    } else if (SettingsManager.KEY_MOD_FOTOS.equals(key)) {
                         bottomNav.getMenu().add(Menu.NONE, R.id.nav_fotos, Menu.NONE, "Fotos").setIcon(R.drawable.ic_flower);
-                    } else if (SettingsFragment.KEY_MOD_ECHO.equals(key)) {
+                    } else if (SettingsManager.KEY_MOD_ECHO.equals(key)) {
                         bottomNav.getMenu().add(Menu.NONE, R.id.nav_echo, Menu.NONE, "Echo").setIcon(R.drawable.ic_robot);
-                    } else if (SettingsFragment.KEY_MOD_APPS.equals(key)) {
+                    } else if (SettingsManager.KEY_MOD_APPS.equals(key)) {
                         bottomNav.getMenu().add(Menu.NONE, R.id.nav_apps, Menu.NONE, "Apps").setIcon(android.R.drawable.ic_menu_edit);
-                    } else if (SettingsFragment.KEY_MOD_WEB.equals(key)) {
+                    } else if (SettingsManager.KEY_MOD_WEB.equals(key)) {
                         bottomNav.getMenu().add(Menu.NONE, R.id.nav_web, Menu.NONE, "Web UI").setIcon(R.drawable.ic_globe);
                     }
                 }
@@ -357,12 +348,13 @@ public class MainActivity extends AppCompatActivity {
 
             Tag tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
             if (tag != null) {
-                SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-                String writeId = prefs.getString("nfc_write_mode_id", null);
+                // Hier greifen wir noch einmal kurz auf die SharedPreferences zu,
+                // da der nfc_write_mode_id ein kurzlebiger "Einmal-Wert" ist.
+                String writeId = settingsManager.getPrefs().getString("nfc_write_mode_id", null);
 
                 if (writeId != null) {
                     writeNfcTag(tag, writeId);
-                    prefs.edit().remove("nfc_write_mode_id").apply();
+                    settingsManager.getPrefs().edit().remove("nfc_write_mode_id").apply();
                     return;
                 }
 
@@ -450,16 +442,15 @@ public class MainActivity extends AppCompatActivity {
     private void sendTagToHomeAssistant(String tagId) {
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
-                SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-                String token = prefs.getString(SettingsFragment.KEY_HOME_TOKEN, "");
+                String token = settingsManager.getHomeToken();
                 if (token.isEmpty()) {
                     runOnUiThread(() -> Toast.makeText(MainActivity.this, "Fehler: Kein Home Assistant Token hinterlegt!", Toast.LENGTH_LONG).show());
                     return;
                 }
 
-                String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
-                String localUrl = prefs.getString(SettingsFragment.KEY_HOME_LOCAL, "");
-                String publicUrl = prefs.getString(SettingsFragment.KEY_HOME_PUBLIC, "");
+                String savedSsid = settingsManager.getWifiSsid();
+                String localUrl = settingsManager.getHomeLocal();
+                String publicUrl = settingsManager.getHomePublic();
                 String currentSsid = NetworkUtils.getCurrentSsid(this);
 
                 String targetUrl = "";
@@ -483,7 +474,10 @@ public class MainActivity extends AppCompatActivity {
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setDoOutput(true);
 
-                String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, "android-app");
+                CryptoUtils cryptoUtils = new CryptoUtils(this);
+                String deviceId = cryptoUtils.getDeviceId();
+                if (deviceId == null || deviceId.isEmpty()) deviceId = "android-app";
+
                 String jsonBody = "{\"tag_id\": \"" + tagId + "\", \"device_id\": \"" + deviceId + "\"}";
 
                 OutputStream os = conn.getOutputStream();
@@ -576,14 +570,10 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private int getDynamicColor(String key, String defaultHex) {
-        SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, MODE_PRIVATE);
-        String hex = prefs.getString(key, defaultHex);
-
+    private int parseColorSafe(String hex, String defaultHex) {
         if (hex != null && !hex.startsWith("#")) {
             hex = "#" + hex;
         }
-
         try {
             return Color.parseColor(hex);
         } catch (Exception e) {

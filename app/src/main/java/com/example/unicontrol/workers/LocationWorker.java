@@ -2,7 +2,6 @@ package com.example.unicontrol.workers;
 
 import android.Manifest;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationManager;
@@ -14,7 +13,8 @@ import androidx.core.content.ContextCompat;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
-import com.example.unicontrol.fragments.SettingsFragment;
+import com.example.unicontrol.utils.CryptoUtils;
+import com.example.unicontrol.utils.SettingsManager;
 
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -22,7 +22,7 @@ import java.net.URL;
 
 public class LocationWorker extends Worker {
 
-    // Wir speichern den Token später in den Settings unter diesem Key
+    // Behalten wir für die Kompatibilität
     public static final String KEY_HOME_TOKEN = "home_assistant_token";
 
     public LocationWorker(@NonNull Context context, @NonNull WorkerParameters workerParams) {
@@ -33,12 +33,15 @@ public class LocationWorker extends Worker {
     @Override
     public Result doWork() {
         Context context = getApplicationContext();
-        SharedPreferences prefs = context.getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+        SettingsManager settingsManager = SettingsManager.getInstance(context);
+        CryptoUtils cryptoUtils = new CryptoUtils(context);
 
-        String publicUrl = prefs.getString(SettingsFragment.KEY_HOME_PUBLIC, "");
-        String localUrl = prefs.getString(SettingsFragment.KEY_HOME_LOCAL, "");
-        String token = prefs.getString(KEY_HOME_TOKEN, "");
-        String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, "unknown_device");
+        String publicUrl = settingsManager.getHomePublic();
+        String localUrl = settingsManager.getHomeLocal();
+        String token = settingsManager.getHomeToken();
+
+        String deviceId = cryptoUtils.getDeviceId();
+        if (deviceId == null || deviceId.isEmpty()) deviceId = "unknown_device";
 
         // Wenn wir keinen Token haben, können wir uns nicht bei Home Assistant anmelden
         if (token.isEmpty()) {

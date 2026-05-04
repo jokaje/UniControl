@@ -3,7 +3,6 @@ package com.example.unicontrol;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.net.Uri;
 import android.nfc.NdefMessage;
 import android.nfc.NdefRecord;
@@ -14,8 +13,9 @@ import android.os.Parcelable;
 import android.util.Log;
 import android.widget.Toast;
 
-import com.example.unicontrol.fragments.SettingsFragment;
+import com.example.unicontrol.utils.CryptoUtils;
 import com.example.unicontrol.utils.NetworkUtils;
+import com.example.unicontrol.utils.SettingsManager;
 
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -87,13 +87,14 @@ public class NfcHandlerActivity extends Activity {
     private void sendTagToHomeAssistant(String tagId) {
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
-                SharedPreferences prefs = getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-                String token = prefs.getString(SettingsFragment.KEY_HOME_TOKEN, "");
+                SettingsManager settingsManager = SettingsManager.getInstance(this);
+
+                String token = settingsManager.getHomeToken();
                 if (token.isEmpty()) return;
 
-                String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
-                String localUrl = prefs.getString(SettingsFragment.KEY_HOME_LOCAL, "");
-                String publicUrl = prefs.getString(SettingsFragment.KEY_HOME_PUBLIC, "");
+                String savedSsid = settingsManager.getWifiSsid();
+                String localUrl = settingsManager.getHomeLocal();
+                String publicUrl = settingsManager.getHomePublic();
                 String currentSsid = NetworkUtils.getCurrentSsid(this);
 
                 String targetUrl = "";
@@ -117,7 +118,10 @@ public class NfcHandlerActivity extends Activity {
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setDoOutput(true);
 
-                String deviceId = prefs.getString(SettingsFragment.KEY_DEVICE_ID, "android-app");
+                CryptoUtils cryptoUtils = new CryptoUtils(this);
+                String deviceId = cryptoUtils.getDeviceId();
+                if (deviceId == null || deviceId.isEmpty()) deviceId = "android-app";
+
                 String jsonBody = "{\"tag_id\": \"" + tagId + "\", \"device_id\": \"" + deviceId + "\"}";
 
                 OutputStream os = conn.getOutputStream();
