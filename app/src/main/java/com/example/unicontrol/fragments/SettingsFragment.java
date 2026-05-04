@@ -6,20 +6,16 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
-import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -33,6 +29,7 @@ import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.ColorUtils;
 import androidx.fragment.app.Fragment;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -48,9 +45,10 @@ import androidx.work.WorkManager;
 import com.bumptech.glide.Glide;
 import com.example.unicontrol.R;
 import com.example.unicontrol.utils.CryptoUtils;
+import com.example.unicontrol.utils.SettingsManager;
+import com.example.unicontrol.viewmodels.SettingsViewModel;
 import com.example.unicontrol.workers.BackupWorker;
 import com.example.unicontrol.workers.LocationWorker;
-import com.example.unicontrol.fragments.AppsFragment;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
@@ -58,13 +56,11 @@ import com.google.android.material.card.MaterialCardView;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class SettingsFragment extends Fragment {
@@ -77,7 +73,7 @@ public class SettingsFragment extends Fragment {
     public static final String KEY_MOD_ECHO = "mod_echo_enabled";
     public static final String KEY_MOD_WEB = "mod_web_enabled";
     public static final String KEY_MOD_APPS = "mod_apps_enabled";
-    public static final String KEY_MOD_ORDER = "mod_order"; // NEU: Speichert die Reihenfolge
+    public static final String KEY_MOD_ORDER = "mod_order";
 
     public static final String KEY_WIFI_SSID = "wifi_ssid";
     public static final String KEY_ECHO_LOCAL = "echo_local";
@@ -113,11 +109,24 @@ public class SettingsFragment extends Fragment {
     private static final int REQUEST_CODE_PERMISSIONS = 1002;
     private static final int REQUEST_CODE_LOCATION = 1004;
 
+    private SettingsManager settingsManager;
+    private SettingsViewModel viewModel;
     private CryptoUtils cryptoUtils;
     private SwitchCompat switchTracking;
 
     private List<ModuleItem> moduleItems;
     private ModuleAdapter moduleAdapter;
+
+    // UI Referenzen
+    private EditText etSsid, etEchoLocal, etEchoPublic, etOpenClawPassword;
+    private EditText etWebLocal, etWebPublic, etAppsLocal, etAppsPublic;
+    private EditText etHomeLocal, etHomePublic, etHomeToken;
+    private EditText etFotosLocal, etFotosPublic, etFotosApiKey;
+    private EditText etDeviceId, etPublicKey, etPrivateKey;
+    private EditText etColorHome, etColorFotos, etColorEcho, etColorWeb, etColorApps, etColorSettings;
+
+    private BottomSheetDialog currentBackupDialog;
+    private LinearLayout backupContainer;
 
     @Nullable
     @Override
@@ -125,35 +134,33 @@ public class SettingsFragment extends Fragment {
         return inflater.inflate(R.layout.fragment_settings, container, false);
     }
 
-    private int getThemeColor() {
-        if (getContext() == null) return Color.parseColor("#EAEAEA");
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        try {
-            return Color.parseColor(prefs.getString(KEY_COLOR_SETTINGS, "#EAEAEA"));
-        } catch (Exception e) {
-            return Color.parseColor("#EAEAEA");
-        }
-    }
-
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-        view.setBackgroundColor(getThemeColor());
 
+        settingsManager = SettingsManager.getInstance(requireContext());
+        viewModel = new ViewModelProvider(this).get(SettingsViewModel.class);
         cryptoUtils = new CryptoUtils(requireContext());
-        SharedPreferences prefs = requireContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
 
-        // --- BINDING DER UI ELEMENTE ---
+        view.setBackgroundColor(Color.parseColor(settingsManager.getColorSettings()));
 
-        // NEU: RecyclerView für Module initialisieren
+        initUI(view);
+        loadValuesToUI();
+        setupObservers();
+
+        MaterialButton btnSaveAll = view.findViewById(R.id.btn_save_all);
+        btnSaveAll.setOnClickListener(v -> saveAllSettings());
+    }
+
+    private void initUI(View view) {
+        // Module RecyclerView
         RecyclerView rvModules = view.findViewById(R.id.rv_modules);
         rvModules.setLayoutManager(new LinearLayoutManager(getContext()));
 
-        moduleItems = loadModuleItems(prefs);
+        moduleItems = loadModuleItems();
         moduleAdapter = new ModuleAdapter(moduleItems);
         rvModules.setAdapter(moduleAdapter);
 
-        // Drag & Drop für die RecyclerView einrichten
         ItemTouchHelper itemTouchHelper = new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP | ItemTouchHelper.DOWN, 0) {
             @Override
             public boolean onMove(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder, @NonNull RecyclerView.ViewHolder target) {
@@ -163,79 +170,38 @@ public class SettingsFragment extends Fragment {
                 moduleAdapter.notifyItemMoved(fromPosition, toPosition);
                 return true;
             }
-
             @Override
             public void onSwiped(@NonNull RecyclerView.ViewHolder viewHolder, int direction) { }
         });
         itemTouchHelper.attachToRecyclerView(rvModules);
 
-        EditText etSsid = view.findViewById(R.id.et_home_ssid);
-        EditText etEchoLocal = view.findViewById(R.id.et_echo_local);
-        EditText etEchoPublic = view.findViewById(R.id.et_echo_public);
-        EditText etOpenClawPassword = view.findViewById(R.id.et_openclaw_password);
-        EditText etWebLocal = view.findViewById(R.id.et_web_local);
-        EditText etWebPublic = view.findViewById(R.id.et_web_public);
-        EditText etAppsLocal = view.findViewById(R.id.et_apps_local);
-        EditText etAppsPublic = view.findViewById(R.id.et_apps_public);
-        EditText etHomeLocal = view.findViewById(R.id.et_home_local);
-        EditText etHomePublic = view.findViewById(R.id.et_home_public);
-        EditText etHomeToken = view.findViewById(R.id.et_home_token);
-        EditText etFotosLocal = view.findViewById(R.id.et_fotos_local);
-        EditText etFotosPublic = view.findViewById(R.id.et_fotos_public);
-        EditText etFotosApiKey = view.findViewById(R.id.et_fotos_api_key);
-
-        // EXPERTEN FELDER FÜR OPENCLAW IDENTITY
-        EditText etDeviceId = view.findViewById(R.id.et_device_id);
-        EditText etPublicKey = view.findViewById(R.id.et_public_key);
-        EditText etPrivateKey = view.findViewById(R.id.et_private_key);
-
-        EditText etColorHome = view.findViewById(R.id.et_color_home);
-        EditText etColorFotos = view.findViewById(R.id.et_color_fotos);
-        EditText etColorEcho = view.findViewById(R.id.et_color_echo);
-        EditText etColorWeb = view.findViewById(R.id.et_color_web);
-        EditText etColorApps = view.findViewById(R.id.et_color_apps);
-        EditText etColorSettings = view.findViewById(R.id.et_color_settings);
+        // Bindings
+        etSsid = view.findViewById(R.id.et_home_ssid);
+        etEchoLocal = view.findViewById(R.id.et_echo_local);
+        etEchoPublic = view.findViewById(R.id.et_echo_public);
+        etOpenClawPassword = view.findViewById(R.id.et_openclaw_password);
+        etWebLocal = view.findViewById(R.id.et_web_local);
+        etWebPublic = view.findViewById(R.id.et_web_public);
+        etAppsLocal = view.findViewById(R.id.et_apps_local);
+        etAppsPublic = view.findViewById(R.id.et_apps_public);
+        etHomeLocal = view.findViewById(R.id.et_home_local);
+        etHomePublic = view.findViewById(R.id.et_home_public);
+        etHomeToken = view.findViewById(R.id.et_home_token);
+        etFotosLocal = view.findViewById(R.id.et_fotos_local);
+        etFotosPublic = view.findViewById(R.id.et_fotos_public);
+        etFotosApiKey = view.findViewById(R.id.et_fotos_api_key);
+        etDeviceId = view.findViewById(R.id.et_device_id);
+        etPublicKey = view.findViewById(R.id.et_public_key);
+        etPrivateKey = view.findViewById(R.id.et_private_key);
+        etColorHome = view.findViewById(R.id.et_color_home);
+        etColorFotos = view.findViewById(R.id.et_color_fotos);
+        etColorEcho = view.findViewById(R.id.et_color_echo);
+        etColorWeb = view.findViewById(R.id.et_color_web);
+        etColorApps = view.findViewById(R.id.et_color_apps);
+        etColorSettings = view.findViewById(R.id.et_color_settings);
 
         switchTracking = view.findViewById(R.id.switch_tracking);
-        MaterialButton btnWriteNfc = view.findViewById(R.id.btn_write_nfc);
-        MaterialButton btnOpenBackup = view.findViewById(R.id.btn_open_backup_settings);
-        MaterialButton btnSaveAll = view.findViewById(R.id.btn_save_all);
 
-        // --- WERTE AUS SHAREDPREFERENCES LADEN ---
-
-        etSsid.setText(prefs.getString(KEY_WIFI_SSID, ""));
-        etEchoLocal.setText(prefs.getString(KEY_ECHO_LOCAL, ""));
-        etEchoPublic.setText(prefs.getString(KEY_ECHO_PUBLIC, ""));
-        if (etOpenClawPassword != null) {
-            etOpenClawPassword.setText(prefs.getString(KEY_OPENCLAW_PASSWORD, ""));
-        }
-        etWebLocal.setText(prefs.getString(KEY_WEB_LOCAL, ""));
-        etWebPublic.setText(prefs.getString(KEY_WEB_PUBLIC, ""));
-        if (etAppsLocal != null) etAppsLocal.setText(prefs.getString(AppsFragment.KEY_APPS_LOCAL, "192.168.86.46:8767"));
-        if (etAppsPublic != null) etAppsPublic.setText(prefs.getString(AppsFragment.KEY_APPS_PUBLIC, "coldnet.dedyn.io:8767"));
-        etHomeLocal.setText(prefs.getString(KEY_HOME_LOCAL, ""));
-        etHomePublic.setText(prefs.getString(KEY_HOME_PUBLIC, ""));
-        etHomeToken.setText(prefs.getString(KEY_HOME_TOKEN, ""));
-        etFotosLocal.setText(prefs.getString(KEY_FOTOS_LOCAL, ""));
-        etFotosPublic.setText(prefs.getString(KEY_FOTOS_PUBLIC, ""));
-        etFotosApiKey.setText(prefs.getString(KEY_FOTOS_API_KEY, ""));
-
-        // EXPERTEN WERTE LADEN
-        if (etDeviceId != null) etDeviceId.setText(cryptoUtils.getDeviceId());
-        if (etPublicKey != null) etPublicKey.setText(cryptoUtils.getPublicKeyBase64());
-        if (etPrivateKey != null) etPrivateKey.setText(cryptoUtils.getPrivateKeyBase64());
-
-        // FARBEN LADEN
-        etColorHome.setText(prefs.getString(KEY_COLOR_HOME, "#B2D3C2"));
-        etColorFotos.setText(prefs.getString(KEY_COLOR_FOTOS, "#F49AC2"));
-        etColorEcho.setText(prefs.getString(KEY_COLOR_ECHO, "#AEC6CF"));
-        etColorWeb.setText(prefs.getString(KEY_COLOR_WEB, "#FDFD96"));
-        if (etColorApps != null) etColorApps.setText(prefs.getString(AppsFragment.KEY_COLOR_APPS, "#D3B8E8"));
-        etColorSettings.setText(prefs.getString(KEY_COLOR_SETTINGS, "#EAEAEA"));
-
-        switchTracking.setChecked(prefs.getBoolean(KEY_LOCATION_TRACKING_ENABLED, false));
-
-        // FARB-PICKER INITIALISIEREN
         setupColorPicker(etColorHome);
         setupColorPicker(etColorFotos);
         setupColorPicker(etColorEcho);
@@ -243,103 +209,136 @@ public class SettingsFragment extends Fragment {
         if (etColorApps != null) setupColorPicker(etColorApps);
         setupColorPicker(etColorSettings);
 
-        // TRACKING LOGIK
+        // Tracker Logic
         switchTracking.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (isChecked) {
-                if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                     switchTracking.setChecked(false);
                     requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQUEST_CODE_LOCATION);
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                     switchTracking.setChecked(false);
                     Toast.makeText(getContext(), "WICHTIG: Bitte wähle gleich 'Immer zulassen' für das Hintergrund-Tracking!", Toast.LENGTH_LONG).show();
                     requestPermissions(new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}, REQUEST_CODE_LOCATION);
                 } else {
-                    prefs.edit().putBoolean(KEY_LOCATION_TRACKING_ENABLED, true).apply();
+                    settingsManager.setLocationTrackingEnabled(true);
                     startLocationTracking();
                     Toast.makeText(getContext(), "Hintergrund-Tracking aktiviert! 📍", Toast.LENGTH_SHORT).show();
                 }
             } else {
-                prefs.edit().putBoolean(KEY_LOCATION_TRACKING_ENABLED, false).apply();
+                settingsManager.setLocationTrackingEnabled(false);
                 WorkManager.getInstance(requireContext()).cancelUniqueWork("HomeAssistantLocation");
                 Toast.makeText(getContext(), "Hintergrund-Tracking pausiert.", Toast.LENGTH_SHORT).show();
             }
         });
 
-        // NFC BUTTON LOGIK
-        btnWriteNfc.setOnClickListener(v -> {
+        view.findViewById(R.id.btn_write_nfc).setOnClickListener(v -> {
             String newTagId = UUID.randomUUID().toString();
-            prefs.edit().putString("nfc_write_mode_id", newTagId).apply();
+            settingsManager.getPrefs().edit().putString("nfc_write_mode_id", newTagId).apply();
             Toast.makeText(getContext(), "Bereit! Halte jetzt einen unbeschriebenen NFC Tag an die Rückseite deines Handys.", Toast.LENGTH_LONG).show();
         });
 
-        // BACKUP BUTTON LOGIK
-        if (btnOpenBackup != null) {
-            btnOpenBackup.setOnClickListener(v -> checkPermissionsAndOpenBackupSettings());
+        view.findViewById(R.id.btn_open_backup_settings).setOnClickListener(v -> checkPermissionsAndOpenBackupSettings());
+    }
+
+    private void loadValuesToUI() {
+        etSsid.setText(settingsManager.getWifiSsid());
+        etEchoLocal.setText(settingsManager.getEchoLocal());
+        etEchoPublic.setText(settingsManager.getEchoPublic());
+        if (etOpenClawPassword != null) etOpenClawPassword.setText(settingsManager.getOpenClawPassword());
+        etWebLocal.setText(settingsManager.getWebLocal());
+        etWebPublic.setText(settingsManager.getWebPublic());
+        if (etAppsLocal != null) etAppsLocal.setText(settingsManager.getAppsLocal());
+        if (etAppsPublic != null) etAppsPublic.setText(settingsManager.getAppsPublic());
+        etHomeLocal.setText(settingsManager.getHomeLocal());
+        etHomePublic.setText(settingsManager.getHomePublic());
+        etHomeToken.setText(settingsManager.getHomeToken());
+        etFotosLocal.setText(settingsManager.getFotosLocal());
+        etFotosPublic.setText(settingsManager.getFotosPublic());
+        etFotosApiKey.setText(settingsManager.getFotosApiKey());
+
+        if (etDeviceId != null) etDeviceId.setText(cryptoUtils.getDeviceId());
+        if (etPublicKey != null) etPublicKey.setText(cryptoUtils.getPublicKeyBase64());
+        if (etPrivateKey != null) etPrivateKey.setText(cryptoUtils.getPrivateKeyBase64());
+
+        etColorHome.setText(settingsManager.getColorHome());
+        etColorFotos.setText(settingsManager.getColorFotos());
+        etColorEcho.setText(settingsManager.getColorEcho());
+        etColorWeb.setText(settingsManager.getColorWeb());
+        if (etColorApps != null) etColorApps.setText(settingsManager.getColorApps());
+        etColorSettings.setText(settingsManager.getColorSettings());
+
+        switchTracking.setChecked(settingsManager.isLocationTrackingEnabled());
+    }
+
+    private void saveAllSettings() {
+        // Module
+        StringBuilder orderBuilder = new StringBuilder();
+        for (int i = 0; i < moduleItems.size(); i++) {
+            ModuleItem item = moduleItems.get(i);
+            settingsManager.setModuleEnabled(item.key, item.enabled);
+            orderBuilder.append(item.key);
+            if (i < moduleItems.size() - 1) orderBuilder.append(",");
+        }
+        settingsManager.setModuleOrder(orderBuilder.toString());
+
+        // Texte
+        settingsManager.setWifiSsid(etSsid.getText().toString().trim());
+        settingsManager.setEchoLocal(etEchoLocal.getText().toString().trim());
+        settingsManager.setEchoPublic(etEchoPublic.getText().toString().trim());
+        if (etOpenClawPassword != null) settingsManager.setOpenClawPassword(etOpenClawPassword.getText().toString().trim());
+
+        settingsManager.setWebLocal(etWebLocal.getText().toString().trim());
+        settingsManager.setWebPublic(etWebPublic.getText().toString().trim());
+        if (etAppsLocal != null) settingsManager.setAppsLocal(etAppsLocal.getText().toString().trim());
+        if (etAppsPublic != null) settingsManager.setAppsPublic(etAppsPublic.getText().toString().trim());
+
+        settingsManager.setHomeLocal(etHomeLocal.getText().toString().trim());
+        settingsManager.setHomePublic(etHomePublic.getText().toString().trim());
+        settingsManager.setHomeToken(etHomeToken.getText().toString().trim());
+
+        settingsManager.setFotosLocal(etFotosLocal.getText().toString().trim());
+        settingsManager.setFotosPublic(etFotosPublic.getText().toString().trim());
+        settingsManager.setFotosApiKey(etFotosApiKey.getText().toString().trim());
+
+        // Crypto
+        if (etDeviceId != null && etPrivateKey != null && etPublicKey != null) {
+            String newDevId = etDeviceId.getText().toString().trim();
+            String newPriv = etPrivateKey.getText().toString().trim();
+            String newPub = etPublicKey.getText().toString().trim();
+            if (!newDevId.isEmpty() && !newPriv.isEmpty() && !newPub.isEmpty()) {
+                cryptoUtils.setIdentity(newDevId, newPriv, newPub);
+            }
         }
 
-        // ALLES SPEICHERN
-        btnSaveAll.setOnClickListener(v -> {
-            SharedPreferences.Editor editor = prefs.edit();
+        // Farben
+        settingsManager.setColorHome(etColorHome.getText().toString().trim());
+        settingsManager.setColorFotos(etColorFotos.getText().toString().trim());
+        settingsManager.setColorEcho(etColorEcho.getText().toString().trim());
+        settingsManager.setColorWeb(etColorWeb.getText().toString().trim());
+        if (etColorApps != null) settingsManager.setColorApps(etColorApps.getText().toString().trim());
+        settingsManager.setColorSettings(etColorSettings.getText().toString().trim());
 
-            // Modul-Sichtbarkeiten & Reihenfolge sicher speichern
-            StringBuilder orderBuilder = new StringBuilder();
-            for (int i = 0; i < moduleItems.size(); i++) {
-                ModuleItem item = moduleItems.get(i);
-                editor.putBoolean(item.key, item.enabled);
-                orderBuilder.append(item.key);
-                if (i < moduleItems.size() - 1) orderBuilder.append(",");
-            }
-            editor.putString(KEY_MOD_ORDER, orderBuilder.toString());
+        Toast.makeText(getContext(), "Einstellungen & Identität gespeichert! ✅", Toast.LENGTH_SHORT).show();
 
-            editor.putString(KEY_WIFI_SSID, etSsid.getText().toString().trim());
-            editor.putString(KEY_ECHO_LOCAL, etEchoLocal.getText().toString().trim());
-            editor.putString(KEY_ECHO_PUBLIC, etEchoPublic.getText().toString().trim());
+        if (getView() != null) getView().setBackgroundColor(Color.parseColor(settingsManager.getColorSettings()));
+        if (getActivity() instanceof com.example.unicontrol.MainActivity) {
+            ((com.example.unicontrol.MainActivity) getActivity()).refreshMenu();
+        }
+    }
 
-            if (etOpenClawPassword != null) {
-                editor.putString(KEY_OPENCLAW_PASSWORD, etOpenClawPassword.getText().toString().trim());
-            }
-
-            editor.putString(KEY_WEB_LOCAL, etWebLocal.getText().toString().trim());
-            editor.putString(KEY_WEB_PUBLIC, etWebPublic.getText().toString().trim());
-            if (etAppsLocal != null) editor.putString(AppsFragment.KEY_APPS_LOCAL, etAppsLocal.getText().toString().trim());
-            if (etAppsPublic != null) editor.putString(AppsFragment.KEY_APPS_PUBLIC, etAppsPublic.getText().toString().trim());
-            editor.putString(KEY_HOME_LOCAL, etHomeLocal.getText().toString().trim());
-            editor.putString(KEY_HOME_PUBLIC, etHomePublic.getText().toString().trim());
-            editor.putString(KEY_HOME_TOKEN, etHomeToken.getText().toString().trim());
-            editor.putString(KEY_FOTOS_LOCAL, etFotosLocal.getText().toString().trim());
-            editor.putString(KEY_FOTOS_PUBLIC, etFotosPublic.getText().toString().trim());
-            editor.putString(KEY_FOTOS_API_KEY, etFotosApiKey.getText().toString().trim());
-
-            // Device ID und Crypto Keys speichern
-            if (etDeviceId != null && etPrivateKey != null && etPublicKey != null) {
-                String newDevId = etDeviceId.getText().toString().trim();
-                String newPriv = etPrivateKey.getText().toString().trim();
-                String newPub = etPublicKey.getText().toString().trim();
-
-                if (!newDevId.isEmpty() && !newPriv.isEmpty() && !newPub.isEmpty()) {
-                    cryptoUtils.setIdentity(newDevId, newPriv, newPub);
+    private void setupObservers() {
+        // ViewModel liefert die lokalen Alben für das Backup-Sheet zurück
+        viewModel.getLocalAlbums().observe(getViewLifecycleOwner(), albums -> {
+            if (backupContainer != null && currentBackupDialog != null) {
+                backupContainer.removeAllViews();
+                if (albums == null || albums.isEmpty()) {
+                    TextView empty = new TextView(getContext());
+                    empty.setText("Keine lokalen Fotos gefunden.");
+                    empty.setGravity(Gravity.CENTER);
+                    backupContainer.addView(empty);
+                } else {
+                    populateBackupList(backupContainer, albums, currentBackupDialog);
                 }
-            }
-
-            editor.putString(KEY_COLOR_HOME, etColorHome.getText().toString().trim());
-            editor.putString(KEY_COLOR_FOTOS, etColorFotos.getText().toString().trim());
-            editor.putString(KEY_COLOR_ECHO, etColorEcho.getText().toString().trim());
-            editor.putString(KEY_COLOR_WEB, etColorWeb.getText().toString().trim());
-            if (etColorApps != null) editor.putString(AppsFragment.KEY_COLOR_APPS, etColorApps.getText().toString().trim());
-            editor.putString(KEY_COLOR_SETTINGS, etColorSettings.getText().toString().trim());
-
-            editor.apply();
-
-            Toast.makeText(getContext(), "Einstellungen & Identität gespeichert! ✅", Toast.LENGTH_SHORT).show();
-
-            // Hintergrundfarbe der UI sofort live anpassen
-            if (getView() != null) {
-                getView().setBackgroundColor(getThemeColor());
-            }
-
-            // Menüleiste in der MainActivity live aktualisieren
-            if (getActivity() instanceof com.example.unicontrol.MainActivity) {
-                ((com.example.unicontrol.MainActivity) getActivity()).refreshMenu();
             }
         });
     }
@@ -349,84 +348,66 @@ public class SettingsFragment extends Fragment {
         WorkManager.getInstance(requireContext()).enqueueUniquePeriodicWork("HomeAssistantLocation", ExistingPeriodicWorkPolicy.UPDATE, locationRequest);
     }
 
-    // --- NEU: Helper-Klassen und Methoden für die verschiebbare Liste ---
-    private List<ModuleItem> loadModuleItems(SharedPreferences prefs) {
+    // --- Verschiebbare Liste (Module) ---
+    private List<ModuleItem> loadModuleItems() {
         List<ModuleItem> allModules = new ArrayList<>();
-        allModules.add(new ModuleItem(KEY_MOD_HOME, "🏠 Home Assistant", "#B2D3C2"));
-        allModules.add(new ModuleItem(KEY_MOD_FOTOS, "☁️ Immich Fotos", "#F49AC2"));
-        allModules.add(new ModuleItem(KEY_MOD_ECHO, "💬 OpenClaw Echo", "#AEC6CF"));
-        allModules.add(new ModuleItem(KEY_MOD_APPS, "🛠️ App Entwicklung", "#D3B8E8"));
-        allModules.add(new ModuleItem(KEY_MOD_WEB, "🌐 Web UI", "#FDFD96"));
+        allModules.add(new ModuleItem(SettingsManager.KEY_MOD_HOME, "🏠 Home Assistant", "#B2D3C2"));
+        allModules.add(new ModuleItem(SettingsManager.KEY_MOD_FOTOS, "☁️ Immich Fotos", "#F49AC2"));
+        allModules.add(new ModuleItem(SettingsManager.KEY_MOD_ECHO, "💬 OpenClaw Echo", "#AEC6CF"));
+        allModules.add(new ModuleItem(SettingsManager.KEY_MOD_APPS, "🛠️ App Entwicklung", "#D3B8E8"));
+        allModules.add(new ModuleItem(SettingsManager.KEY_MOD_WEB, "🌐 Web UI", "#FDFD96"));
 
-        String defaultOrder = KEY_MOD_HOME + "," + KEY_MOD_FOTOS + "," + KEY_MOD_ECHO + "," + KEY_MOD_APPS + "," + KEY_MOD_WEB;
-        String orderString = prefs.getString(KEY_MOD_ORDER, defaultOrder);
+        String orderString = settingsManager.getModuleOrder();
         String[] keys = orderString.split(",");
 
         List<ModuleItem> sorted = new ArrayList<>();
         for (String key : keys) {
             for (ModuleItem item : allModules) {
                 if (item.key.equals(key)) {
-                    item.enabled = prefs.getBoolean(key, true);
+                    item.enabled = settingsManager.isModuleEnabled(key);
                     sorted.add(item);
                     break;
                 }
             }
         }
-
-        // Fallback: Falls neue Module in der App dazu kommen, aber noch nicht im Speicher stehen
         for (ModuleItem item : allModules) {
             if (!sorted.contains(item)) {
-                item.enabled = prefs.getBoolean(item.key, true);
+                item.enabled = settingsManager.isModuleEnabled(item.key);
                 sorted.add(item);
             }
         }
         return sorted;
     }
 
-    public static class ModuleItem {
-        String key;
-        String title;
-        String colorHex;
+    private static class ModuleItem {
+        String key, title, colorHex;
         boolean enabled;
-
-        public ModuleItem(String key, String title, String colorHex) {
-            this.key = key;
-            this.title = title;
-            this.colorHex = colorHex;
-            this.enabled = true;
+        ModuleItem(String key, String title, String colorHex) {
+            this.key = key; this.title = title; this.colorHex = colorHex; this.enabled = true;
         }
     }
 
     private class ModuleAdapter extends RecyclerView.Adapter<ModuleAdapter.ViewHolder> {
         private final List<ModuleItem> items;
 
-        ModuleAdapter(List<ModuleItem> items) {
-            this.items = items;
-        }
+        ModuleAdapter(List<ModuleItem> items) { this.items = items; }
 
-        @NonNull
-        @Override
+        @NonNull @Override
         public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_module, parent, false);
-            return new ViewHolder(view);
+            return new ViewHolder(LayoutInflater.from(parent.getContext()).inflate(R.layout.item_module, parent, false));
         }
 
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
             ModuleItem item = items.get(position);
             holder.switchModule.setText(item.title);
-            holder.switchModule.setOnCheckedChangeListener(null); // Trigger-Loops vermeiden
+            holder.switchModule.setOnCheckedChangeListener(null);
             holder.switchModule.setChecked(item.enabled);
-            try {
-                int color = Color.parseColor(item.colorHex);
-                holder.switchModule.setThumbTintList(ColorStateList.valueOf(color));
-            } catch (Exception ignored) {}
-
+            try { holder.switchModule.setThumbTintList(ColorStateList.valueOf(Color.parseColor(item.colorHex))); } catch (Exception ignored) {}
             holder.switchModule.setOnCheckedChangeListener((buttonView, isChecked) -> item.enabled = isChecked);
         }
 
-        @Override
-        public int getItemCount() { return items.size(); }
+        @Override public int getItemCount() { return items.size(); }
 
         class ViewHolder extends RecyclerView.ViewHolder {
             SwitchCompat switchModule;
@@ -438,8 +419,8 @@ public class SettingsFragment extends Fragment {
             }
         }
     }
-    // ---------------------------------------------------------------------
 
+    // --- UI Helpers ---
     private void setupColorPicker(EditText editText) {
         editText.setFocusable(false);
         editText.setClickable(true);
@@ -457,8 +438,7 @@ public class SettingsFragment extends Fragment {
         builder.setTitle("Wähle eine Menü-Farbe");
 
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(getContext(), android.R.layout.select_dialog_item, colorNames) {
-            @NonNull
-            @Override
+            @NonNull @Override
             public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
                 TextView view = (TextView) super.getView(position, convertView, parent);
                 view.setTextSize(16f);
@@ -482,8 +462,7 @@ public class SettingsFragment extends Fragment {
             applyColorToEditText(targetEditText, selectedHex);
         });
 
-        builder.setNegativeButton("Abbrechen", null);
-        builder.show();
+        builder.setNegativeButton("Abbrechen", null).show();
     }
 
     private void applyColorToEditText(EditText editText, String hexColor) {
@@ -495,6 +474,7 @@ public class SettingsFragment extends Fragment {
         } catch (Exception ignored) {}
     }
 
+    // --- Backup Logik ---
     private void checkPermissionsAndOpenBackupSettings() {
         if (getContext() == null || getActivity() == null) return;
         List<String> requiredPermissions = new ArrayList<>();
@@ -520,12 +500,10 @@ public class SettingsFragment extends Fragment {
             boolean allGranted = true;
             for (int result : grantResults) if (result != PackageManager.PERMISSION_GRANTED) { allGranted = false; break; }
             if (allGranted) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                     Toast.makeText(getContext(), "Schritt 1 fertig! Aktiviere den Schalter erneut für die Hintergrund-Erlaubnis.", Toast.LENGTH_LONG).show();
                 } else {
-                    if (switchTracking != null) {
-                        switchTracking.setChecked(true);
-                    }
+                    if (switchTracking != null) switchTracking.setChecked(true);
                 }
             } else {
                 Toast.makeText(getContext(), "Bitte wähle 'Immer zulassen', sonst klappt das Tracking im Hintergrund nicht.", Toast.LENGTH_LONG).show();
@@ -535,114 +513,61 @@ public class SettingsFragment extends Fragment {
 
     private void showBackupSettingsBottomSheet() {
         if (getContext() == null) return;
-        BottomSheetDialog dialog = new BottomSheetDialog(getContext());
+        currentBackupDialog = new BottomSheetDialog(getContext());
         View sheetView = LayoutInflater.from(getContext()).inflate(R.layout.bottom_sheet_list, null);
-        sheetView.setBackgroundTintList(ColorStateList.valueOf(getThemeColor()));
-        dialog.setContentView(sheetView);
-        View bottomSheetInternal = dialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
+        sheetView.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor(settingsManager.getColorSettings())));
+        currentBackupDialog.setContentView(sheetView);
+
+        View bottomSheetInternal = currentBackupDialog.findViewById(com.google.android.material.R.id.design_bottom_sheet);
         if (bottomSheetInternal != null) bottomSheetInternal.setBackgroundResource(android.R.color.transparent);
+
         TextView tvTitle = sheetView.findViewById(R.id.tv_bs_title);
-        LinearLayout container = sheetView.findViewById(R.id.layout_bs_container);
+        backupContainer = sheetView.findViewById(R.id.layout_bs_container);
         tvTitle.setText("Back-Up Alben wählen");
+
         TextView loading = new TextView(getContext());
         loading.setText("Durchsuche dein Smartphone...");
         loading.setGravity(Gravity.CENTER);
         loading.setPadding(0, 50, 0, 50);
-        container.addView(loading);
-        dialog.show();
-        Executors.newSingleThreadExecutor().execute(() -> {
-            List<LocalAlbum> albums = scanLocalMediaFolders();
-            if (getActivity() != null) {
-                getActivity().runOnUiThread(() -> {
-                    container.removeAllViews();
-                    if (albums.isEmpty()) {
-                        TextView empty = new TextView(getContext());
-                        empty.setText("Keine lokalen Fotos gefunden.");
-                        empty.setGravity(Gravity.CENTER);
-                        container.addView(empty);
-                    } else {
-                        populateBackupList(container, albums, dialog);
-                    }
-                });
-            }
-        });
+        backupContainer.addView(loading);
+
+        currentBackupDialog.show();
+        viewModel.loadLocalMediaFolders(requireContext());
     }
 
-    private List<LocalAlbum> scanLocalMediaFolders() {
-        List<LocalAlbum> resultList = new ArrayList<>();
-        if (getContext() == null) return resultList;
-        HashMap<String, LocalAlbum> albumMap = new HashMap<>();
-        Uri[] uris = { MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI };
-        String[] projection = { MediaStore.MediaColumns.BUCKET_ID, MediaStore.MediaColumns.BUCKET_DISPLAY_NAME, MediaStore.MediaColumns.DATA };
-        for (Uri uri : uris) {
-            try (Cursor cursor = getContext().getContentResolver().query(uri, projection, null, null, "DATE_ADDED DESC")) {
-                if (cursor != null) {
-                    int bucketIdColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_ID);
-                    int bucketNameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME);
-                    int dataColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA);
-                    while (cursor.moveToNext()) {
-                        String bucketId = cursor.getString(bucketIdColumn);
-                        String bucketName = cursor.getString(bucketNameColumn);
-                        String imagePath = cursor.getString(dataColumn);
-                        if (bucketName == null) bucketName = "Unbekannt";
-                        if (albumMap.containsKey(bucketId)) {
-                            albumMap.get(bucketId).count++;
-                        } else {
-                            LocalAlbum newAlbum = new LocalAlbum();
-                            newAlbum.id = bucketId;
-                            newAlbum.name = bucketName;
-                            newAlbum.count = 1;
-                            newAlbum.coverImagePath = imagePath;
-                            albumMap.put(bucketId, newAlbum);
-                        }
-                    }
-                }
-            } catch (Exception e) {}
-        }
-        resultList.addAll(albumMap.values());
-        Collections.sort(resultList, (a, b) -> {
-            if (a.name.equalsIgnoreCase("camera")) return -1;
-            if (b.name.equalsIgnoreCase("camera")) return 1;
-            return a.name.compareToIgnoreCase(b.name);
-        });
-        return resultList;
-    }
-
-    private void scheduleAutoBackup(SharedPreferences prefs) {
-        if (getContext() == null) return;
-        if (!prefs.getBoolean(KEY_AUTO_BACKUP_ENABLED, false)) {
+    private void scheduleAutoBackup() {
+        if (!settingsManager.isAutoBackupEnabled()) {
             WorkManager.getInstance(requireContext()).cancelUniqueWork("ImmichAutoBackup");
             return;
         }
-        int hour = prefs.getInt(KEY_AUTO_BACKUP_HOUR, 2);
-        int minute = prefs.getInt(KEY_AUTO_BACKUP_MINUTE, 0);
+        int hour = settingsManager.getAutoBackupHour();
+        int minute = settingsManager.getAutoBackupMinute();
+
         Calendar currentDate = Calendar.getInstance();
         Calendar dueDate = Calendar.getInstance();
         dueDate.set(Calendar.HOUR_OF_DAY, hour);
         dueDate.set(Calendar.MINUTE, minute);
         dueDate.set(Calendar.SECOND, 0);
-        if (dueDate.before(currentDate)) {
-            dueDate.add(Calendar.HOUR_OF_DAY, 24);
-        }
+        if (dueDate.before(currentDate)) dueDate.add(Calendar.HOUR_OF_DAY, 24);
+
         long timeDiff = dueDate.getTimeInMillis() - currentDate.getTimeInMillis();
         Constraints constraints = new Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.UNMETERED)
                 .setRequiresBatteryNotLow(true)
                 .build();
         OneTimeWorkRequest backupRequest = new OneTimeWorkRequest.Builder(BackupWorker.class)
-                .setInitialDelay(timeDiff, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .setInitialDelay(timeDiff, TimeUnit.MILLISECONDS)
                 .setConstraints(constraints)
                 .build();
         WorkManager.getInstance(requireContext()).enqueueUniqueWork("ImmichAutoBackup", ExistingWorkPolicy.REPLACE, backupRequest);
     }
 
-    private void populateBackupList(LinearLayout container, List<LocalAlbum> albums, BottomSheetDialog dialog) {
+    private void populateBackupList(LinearLayout container, List<SettingsViewModel.LocalAlbum> albums, BottomSheetDialog dialog) {
         if (getContext() == null) return;
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        Set<String> selectedBuckets = prefs.getStringSet(KEY_BACKUP_ALBUMS, new HashSet<>());
-        boolean isAutoBackup = prefs.getBoolean(KEY_AUTO_BACKUP_ENABLED, false);
-        int savedHour = prefs.getInt(KEY_AUTO_BACKUP_HOUR, 2);
-        int savedMinute = prefs.getInt(KEY_AUTO_BACKUP_MINUTE, 0);
+        Set<String> selectedBuckets = settingsManager.getBackupAlbums();
+        boolean isAutoBackup = settingsManager.isAutoBackupEnabled();
+        int savedHour = settingsManager.getAutoBackupHour();
+        int savedMinute = settingsManager.getAutoBackupMinute();
 
         LinearLayout autoBackupRow = new LinearLayout(getContext());
         autoBackupRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -678,8 +603,7 @@ public class SettingsFragment extends Fragment {
         tvTimeLabel.setText("Tägliche Ausführung (im WLAN):");
         tvTimeLabel.setTextColor(Color.parseColor("#666666"));
         tvTimeLabel.setTextSize(14f);
-        LinearLayout.LayoutParams timeLabelParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        tvTimeLabel.setLayoutParams(timeLabelParams);
+        timeRow.addView(tvTimeLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         TextView tvTimeValue = new TextView(getContext());
         tvTimeValue.setText(String.format(Locale.getDefault(), "%02d:%02d Uhr", savedHour, savedMinute));
@@ -691,25 +615,22 @@ public class SettingsFragment extends Fragment {
         tvTimeValue.setPadding(32, 16, 32, 16);
 
         tvTimeValue.setOnClickListener(v -> {
-            int currentHour = prefs.getInt(KEY_AUTO_BACKUP_HOUR, 2);
-            int currentMinute = prefs.getInt(KEY_AUTO_BACKUP_MINUTE, 0);
             new TimePickerDialog(getContext(), (view, hourOfDay, minute) -> {
-                prefs.edit().putInt(KEY_AUTO_BACKUP_HOUR, hourOfDay).putInt(KEY_AUTO_BACKUP_MINUTE, minute).apply();
+                settingsManager.setAutoBackupTime(hourOfDay, minute);
                 tvTimeValue.setText(String.format(Locale.getDefault(), "%02d:%02d Uhr", hourOfDay, minute));
-                scheduleAutoBackup(prefs);
+                scheduleAutoBackup();
                 Toast.makeText(getContext(), "Backup-Zeit auf " + String.format(Locale.getDefault(), "%02d:%02d", hourOfDay, minute) + " geändert.", Toast.LENGTH_SHORT).show();
-            }, currentHour, currentMinute, true).show();
+            }, settingsManager.getAutoBackupHour(), settingsManager.getAutoBackupMinute(), true).show();
         });
 
-        timeRow.addView(tvTimeLabel);
         timeRow.addView(tvTimeValue);
         container.addView(timeRow);
 
         autoToggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            prefs.edit().putBoolean(KEY_AUTO_BACKUP_ENABLED, isChecked).apply();
+            settingsManager.setAutoBackupEnabled(isChecked);
             timeRow.setVisibility(isChecked ? View.VISIBLE : View.GONE);
             if (isChecked) {
-                scheduleAutoBackup(prefs);
+                scheduleAutoBackup();
                 Toast.makeText(getContext(), "Hintergrund-Backup aktiviert! 🚀", Toast.LENGTH_SHORT).show();
             } else {
                 WorkManager.getInstance(requireContext()).cancelUniqueWork("ImmichAutoBackup");
@@ -730,7 +651,7 @@ public class SettingsFragment extends Fragment {
         infoText.setPadding(0, 0, 0, 32);
         container.addView(infoText);
 
-        for (LocalAlbum album : albums) {
+        for (SettingsViewModel.LocalAlbum album : albums) {
             LinearLayout row = new LinearLayout(getContext());
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
@@ -776,10 +697,10 @@ public class SettingsFragment extends Fragment {
             toggle.setTrackTintList(ColorStateList.valueOf(Color.parseColor("#D0D0D0")));
 
             toggle.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                Set<String> currentSelected = new HashSet<>(prefs.getStringSet(KEY_BACKUP_ALBUMS, new HashSet<>()));
+                Set<String> currentSelected = new HashSet<>(settingsManager.getBackupAlbums());
                 if (isChecked) currentSelected.add(album.id);
                 else currentSelected.remove(album.id);
-                prefs.edit().putStringSet(KEY_BACKUP_ALBUMS, currentSelected).apply();
+                settingsManager.setBackupAlbums(currentSelected);
             });
 
             row.addView(toggle);
@@ -803,7 +724,7 @@ public class SettingsFragment extends Fragment {
         container.addView(uploadLayout);
 
         activeBtnSync.setOnClickListener(v -> {
-            Set<String> toSync = prefs.getStringSet(KEY_BACKUP_ALBUMS, new HashSet<>());
+            Set<String> toSync = settingsManager.getBackupAlbums();
             if (toSync.isEmpty()) {
                 Toast.makeText(getContext(), "Bitte wähle zuerst mindestens einen Ordner aus!", Toast.LENGTH_SHORT).show();
                 return;
@@ -814,12 +735,5 @@ public class SettingsFragment extends Fragment {
             Toast.makeText(getContext(), "Backup gestartet! Siehe Benachrichtigungsleiste.", Toast.LENGTH_LONG).show();
             dialog.dismiss();
         });
-    }
-
-    private static class LocalAlbum {
-        String id;
-        String name;
-        int count;
-        String coverImagePath;
     }
 }
