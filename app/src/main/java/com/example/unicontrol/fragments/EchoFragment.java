@@ -50,6 +50,7 @@ import com.example.unicontrol.adapters.ChatAdapter;
 import com.example.unicontrol.models.ChatMessage;
 import com.example.unicontrol.services.OpenClawService;
 import com.example.unicontrol.utils.CryptoUtils;
+import com.example.unicontrol.utils.SettingsManager;
 import com.example.unicontrol.viewmodels.SharedViewModel;
 import com.google.android.material.button.MaterialButton;
 import com.google.gson.Gson;
@@ -96,6 +97,7 @@ public class EchoFragment extends Fragment {
 
     private int currentThemeColor;
     private CryptoUtils cryptoUtils;
+    private SettingsManager settingsManager;
 
     private String pendingBase64 = null;
     private String pendingMimeType = null;
@@ -148,6 +150,9 @@ public class EchoFragment extends Fragment {
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_echo, container, false);
 
+        settingsManager = SettingsManager.getInstance(requireContext());
+        cryptoUtils = new CryptoUtils(requireContext());
+
         // --- LAYER BINDING ---
         layoutChat = view.findViewById(R.id.layout_echo_chat);
         layoutSetup = view.findViewById(R.id.layout_echo_setup);
@@ -162,8 +167,6 @@ public class EchoFragment extends Fragment {
         EditText etSetupPriv = view.findViewById(R.id.et_setup_priv_key);
         MaterialButton btnSetupSave = view.findViewById(R.id.btn_setup_save);
         MaterialButton btnIntroNext = view.findViewById(R.id.btn_intro_next);
-
-        // NEU: Der Skip-Button
         MaterialButton btnIntroSkip = view.findViewById(R.id.btn_intro_skip);
 
         // Chat Fields
@@ -183,10 +186,8 @@ public class EchoFragment extends Fragment {
         chatRecyclerView.setLayoutManager(layoutManager);
         chatRecyclerView.setAdapter(chatAdapter);
 
-        SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        cryptoUtils = new CryptoUtils(requireContext());
-
-        String echoColorHex = prefs.getString(SettingsFragment.KEY_COLOR_ECHO, "#AEC6CF");
+        // Theme laden über SettingsManager
+        String echoColorHex = settingsManager.getColorEcho();
         currentThemeColor = Color.parseColor("#AEC6CF");
         try { currentThemeColor = Color.parseColor(echoColorHex); } catch (Exception ignored) {}
 
@@ -201,7 +202,7 @@ public class EchoFragment extends Fragment {
 
         // --- ONBOARDING LOGIK ---
         boolean hasIdentity = cryptoUtils.hasValidIdentity();
-        String localUrl = prefs.getString(SettingsFragment.KEY_ECHO_LOCAL, "");
+        String localUrl = settingsManager.getEchoLocal();
 
         if (!hasIdentity || localUrl.isEmpty()) {
             // Zeige Sprechblase & Setup!
@@ -209,10 +210,10 @@ public class EchoFragment extends Fragment {
             layoutSetup.setVisibility(View.VISIBLE);
             layoutIntroOverlay.setVisibility(View.VISIBLE);
 
-            // Vorbefüllen falls teilweise Daten vorhanden
+            // Vorbefüllen falls teilweise Daten vorhanden (über SettingsManager)
             etSetupLocal.setText(localUrl);
-            etSetupPublic.setText(prefs.getString(SettingsFragment.KEY_ECHO_PUBLIC, ""));
-            etSetupPass.setText(prefs.getString(SettingsFragment.KEY_OPENCLAW_PASSWORD, ""));
+            etSetupPublic.setText(settingsManager.getEchoPublic());
+            etSetupPass.setText(settingsManager.getOpenClawPassword());
             etSetupDevice.setText(cryptoUtils.getDeviceId());
             etSetupPub.setText(cryptoUtils.getPublicKeyBase64());
             etSetupPriv.setText(cryptoUtils.getPrivateKeyBase64());
@@ -232,9 +233,9 @@ public class EchoFragment extends Fragment {
         // Klick auf "Einrichten": Blendet nur die Blase aus
         btnIntroNext.setOnClickListener(v -> layoutIntroOverlay.setVisibility(View.GONE));
 
-        // NEU: Klick auf "Nicht benötigt": Deaktiviert das Modul und geht weiter!
+        // Klick auf "Nicht benötigt": Deaktiviert das Modul und geht weiter!
         btnIntroSkip.setOnClickListener(v -> {
-            prefs.edit().putBoolean(SettingsFragment.KEY_MOD_ECHO, false).apply();
+            settingsManager.setModuleEnabled(SettingsManager.KEY_MOD_ECHO, false);
             Toast.makeText(getContext(), "Echo-Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
 
             if (getActivity() instanceof MainActivity) {
@@ -246,11 +247,9 @@ public class EchoFragment extends Fragment {
 
         // Klick auf "Speichern": Schließt Setup ab und geht weiter
         btnSetupSave.setOnClickListener(v -> {
-            prefs.edit()
-                    .putString(SettingsFragment.KEY_ECHO_LOCAL, etSetupLocal.getText().toString().trim())
-                    .putString(SettingsFragment.KEY_ECHO_PUBLIC, etSetupPublic.getText().toString().trim())
-                    .putString(SettingsFragment.KEY_OPENCLAW_PASSWORD, etSetupPass.getText().toString().trim())
-                    .apply();
+            settingsManager.setEchoLocal(etSetupLocal.getText().toString().trim());
+            settingsManager.setEchoPublic(etSetupPublic.getText().toString().trim());
+            settingsManager.setOpenClawPassword(etSetupPass.getText().toString().trim());
 
             cryptoUtils.setIdentity(
                     etSetupDevice.getText().toString().trim(),
@@ -490,8 +489,8 @@ public class EchoFragment extends Fragment {
                     OkHttpClient httpClient = new OkHttpClient();
                     Request.Builder reqBuilder = new Request.Builder().url(uri.toString());
 
-                    SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-                    String apiKey = prefs.getString(SettingsFragment.KEY_FOTOS_API_KEY, "");
+                    // API Key via SettingsManager holen
+                    String apiKey = settingsManager.getFotosApiKey();
                     if (!apiKey.isEmpty()) {
                         reqBuilder.addHeader("x-api-key", apiKey);
                         reqBuilder.addHeader("Accept", "application/json");

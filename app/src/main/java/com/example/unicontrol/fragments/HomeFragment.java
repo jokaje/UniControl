@@ -1,8 +1,6 @@
 package com.example.unicontrol.fragments;
 
 import android.annotation.SuppressLint;
-import android.content.Context;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -23,6 +21,7 @@ import androidx.fragment.app.Fragment;
 import com.example.unicontrol.MainActivity;
 import com.example.unicontrol.R;
 import com.example.unicontrol.utils.NetworkUtils;
+import com.example.unicontrol.utils.SettingsManager;
 import com.google.android.material.button.MaterialButton;
 
 public class HomeFragment extends Fragment {
@@ -36,6 +35,9 @@ public class HomeFragment extends Fragment {
     private TextView tvPlaceholder;
     private String currentLoadedUrl = "";
 
+    // Unser neuer zentraler SettingsManager
+    private SettingsManager settingsManager;
+
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -47,15 +49,17 @@ public class HomeFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        // SettingsManager initialisieren
+        settingsManager = SettingsManager.getInstance(requireContext());
+
         // --- LAYER BINDING ---
         layoutHomeContent = view.findViewById(R.id.layout_home_content);
         layoutHomeSetup = view.findViewById(R.id.layout_home_setup);
         layoutHomeIntroOverlay = view.findViewById(R.id.layout_home_intro_overlay);
 
-        // Dynamische Farbe anwenden!
-        SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+        // Dynamische Farbe anwenden (sauber über den Manager geladen)
         try {
-            view.setBackgroundColor(Color.parseColor(prefs.getString(SettingsFragment.KEY_COLOR_HOME, "#B2D3C2")));
+            view.setBackgroundColor(Color.parseColor(settingsManager.getColorHome()));
         } catch (Exception ignored) {}
 
         webView = view.findViewById(R.id.webview_home);
@@ -118,13 +122,13 @@ public class HomeFragment extends Fragment {
         }
     }
 
-    // --- NEU: Onboarding und Weiterleitungs-Logik ---
+    // --- Onboarding und Weiterleitungs-Logik ---
     private void checkOnboarding() {
         if (getContext() == null || getView() == null) return;
 
-        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String localUrl = prefs.getString(SettingsFragment.KEY_HOME_LOCAL, "");
-        String publicUrl = prefs.getString(SettingsFragment.KEY_HOME_PUBLIC, "");
+        // Anstatt SharedPreferences direkt anzusprechen, nutzen wir den Manager
+        String localUrl = settingsManager.getHomeLocal();
+        String publicUrl = settingsManager.getHomePublic();
 
         // Wenn beide URLs leer sind, gehen wir davon aus, dass Home Assistant noch nicht eingerichtet ist
         if (localUrl.isEmpty() && publicUrl.isEmpty()) {
@@ -141,10 +145,10 @@ public class HomeFragment extends Fragment {
             MaterialButton btnSetupSave = getView().findViewById(R.id.btn_home_setup_save);
 
             // Vorbefüllen falls teilweise Daten vorhanden
-            if (etSetupSsid != null) etSetupSsid.setText(prefs.getString(SettingsFragment.KEY_WIFI_SSID, ""));
+            if (etSetupSsid != null) etSetupSsid.setText(settingsManager.getWifiSsid());
             if (etSetupLocal != null) etSetupLocal.setText(localUrl);
             if (etSetupPublic != null) etSetupPublic.setText(publicUrl);
-            if (etSetupToken != null) etSetupToken.setText(prefs.getString(SettingsFragment.KEY_HOME_TOKEN, ""));
+            if (etSetupToken != null) etSetupToken.setText(settingsManager.getHomeToken());
 
             // Klick auf "Einrichten": Blase weg, Setup zeigen
             if (btnIntroNext != null) btnIntroNext.setOnClickListener(v -> layoutHomeIntroOverlay.setVisibility(View.GONE));
@@ -152,7 +156,7 @@ public class HomeFragment extends Fragment {
             // Klick auf "Ausblenden": Modul deaktivieren & weiter
             if (btnIntroSkip != null) {
                 btnIntroSkip.setOnClickListener(v -> {
-                    prefs.edit().putBoolean(SettingsFragment.KEY_MOD_HOME, false).apply();
+                    settingsManager.setModuleEnabled(SettingsManager.KEY_MOD_HOME, false);
                     Toast.makeText(getContext(), "Home-Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
 
                     if (getActivity() instanceof MainActivity) {
@@ -165,12 +169,10 @@ public class HomeFragment extends Fragment {
             // Klick auf "Speichern": Daten speichern, WebView starten & weiter
             if (btnSetupSave != null) {
                 btnSetupSave.setOnClickListener(v -> {
-                    prefs.edit()
-                            .putString(SettingsFragment.KEY_WIFI_SSID, etSetupSsid.getText().toString().trim())
-                            .putString(SettingsFragment.KEY_HOME_LOCAL, etSetupLocal.getText().toString().trim())
-                            .putString(SettingsFragment.KEY_HOME_PUBLIC, etSetupPublic.getText().toString().trim())
-                            .putString(SettingsFragment.KEY_HOME_TOKEN, etSetupToken.getText().toString().trim())
-                            .apply();
+                    settingsManager.setWifiSsid(etSetupSsid.getText().toString().trim());
+                    settingsManager.setHomeLocal(etSetupLocal.getText().toString().trim());
+                    settingsManager.setHomePublic(etSetupPublic.getText().toString().trim());
+                    settingsManager.setHomeToken(etSetupToken.getText().toString().trim());
 
                     Toast.makeText(getContext(), "Home Assistant verbunden! ✅", Toast.LENGTH_SHORT).show();
 
@@ -195,10 +197,10 @@ public class HomeFragment extends Fragment {
 
     private void loadAppropriateUrl() {
         if (getContext() == null || webView == null) return;
-        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
-        String localUrl = prefs.getString(SettingsFragment.KEY_HOME_LOCAL, "");
-        String publicUrl = prefs.getString(SettingsFragment.KEY_HOME_PUBLIC, "");
+
+        String savedSsid = settingsManager.getWifiSsid();
+        String localUrl = settingsManager.getHomeLocal();
+        String publicUrl = settingsManager.getHomePublic();
         String currentSsid = NetworkUtils.getCurrentSsid(getContext());
         String targetUrl = "";
 

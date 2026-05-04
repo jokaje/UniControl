@@ -1,8 +1,6 @@
 package com.example.unicontrol.fragments;
 
 import android.annotation.SuppressLint;
-import android.content.Context;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -23,6 +21,7 @@ import androidx.fragment.app.Fragment;
 import com.example.unicontrol.MainActivity;
 import com.example.unicontrol.R;
 import com.example.unicontrol.utils.NetworkUtils;
+import com.example.unicontrol.utils.SettingsManager;
 import com.google.android.material.button.MaterialButton;
 
 public class WebUiFragment extends Fragment {
@@ -36,6 +35,9 @@ public class WebUiFragment extends Fragment {
     private TextView tvPlaceholder;
     private String currentLoadedUrl = "";
 
+    // Unser zentraler SettingsManager
+    private SettingsManager settingsManager;
+
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -47,15 +49,17 @@ public class WebUiFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        // SettingsManager initialisieren
+        settingsManager = SettingsManager.getInstance(requireContext());
+
         // --- LAYER BINDING ---
         layoutWebContent = view.findViewById(R.id.layout_web_content);
         layoutWebSetup = view.findViewById(R.id.layout_web_setup);
         layoutWebIntroOverlay = view.findViewById(R.id.layout_web_intro_overlay);
 
-        // Dynamische Farbe anwenden!
-        SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
+        // Dynamische Farbe anwenden
         try {
-            view.setBackgroundColor(Color.parseColor(prefs.getString(SettingsFragment.KEY_COLOR_WEB, "#FDFD96")));
+            view.setBackgroundColor(Color.parseColor(settingsManager.getColorWeb()));
         } catch (Exception ignored) {}
 
         webView = view.findViewById(R.id.webview_web_ui);
@@ -118,13 +122,12 @@ public class WebUiFragment extends Fragment {
         }
     }
 
-    // --- NEU: Onboarding und Weiterleitungs-Logik ---
+    // --- Onboarding und Weiterleitungs-Logik ---
     private void checkOnboarding() {
         if (getContext() == null || getView() == null) return;
 
-        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String localUrl = prefs.getString(SettingsFragment.KEY_WEB_LOCAL, "");
-        String publicUrl = prefs.getString(SettingsFragment.KEY_WEB_PUBLIC, "");
+        String localUrl = settingsManager.getWebLocal();
+        String publicUrl = settingsManager.getWebPublic();
 
         // Wenn beide URLs leer sind, zeigen wir das Setup an
         if (localUrl.isEmpty() && publicUrl.isEmpty()) {
@@ -148,7 +151,7 @@ public class WebUiFragment extends Fragment {
             // Klick auf "Ausblenden": Modul deaktivieren & weiter
             if (btnIntroSkip != null) {
                 btnIntroSkip.setOnClickListener(v -> {
-                    prefs.edit().putBoolean(SettingsFragment.KEY_MOD_WEB, false).apply();
+                    settingsManager.setModuleEnabled(SettingsManager.KEY_MOD_WEB, false);
                     Toast.makeText(getContext(), "Web UI Modul ausgeblendet.", Toast.LENGTH_SHORT).show();
 
                     if (getActivity() instanceof MainActivity) {
@@ -161,10 +164,8 @@ public class WebUiFragment extends Fragment {
             // Klick auf "Speichern": Daten speichern, WebView starten & weiter
             if (btnSetupSave != null) {
                 btnSetupSave.setOnClickListener(v -> {
-                    prefs.edit()
-                            .putString(SettingsFragment.KEY_WEB_LOCAL, etSetupLocal.getText().toString().trim())
-                            .putString(SettingsFragment.KEY_WEB_PUBLIC, etSetupPublic.getText().toString().trim())
-                            .apply();
+                    settingsManager.setWebLocal(etSetupLocal.getText().toString().trim());
+                    settingsManager.setWebPublic(etSetupPublic.getText().toString().trim());
 
                     Toast.makeText(getContext(), "Web UI verbunden! ✅", Toast.LENGTH_SHORT).show();
 
@@ -189,10 +190,10 @@ public class WebUiFragment extends Fragment {
 
     private void loadAppropriateUrl() {
         if (getContext() == null || webView == null) return;
-        SharedPreferences prefs = getContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String savedSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
-        String localUrl = prefs.getString(SettingsFragment.KEY_WEB_LOCAL, "");
-        String publicUrl = prefs.getString(SettingsFragment.KEY_WEB_PUBLIC, "");
+
+        String savedSsid = settingsManager.getWifiSsid();
+        String localUrl = settingsManager.getWebLocal();
+        String publicUrl = settingsManager.getWebPublic();
         String currentSsid = NetworkUtils.getCurrentSsid(getContext());
         String targetUrl = "";
 

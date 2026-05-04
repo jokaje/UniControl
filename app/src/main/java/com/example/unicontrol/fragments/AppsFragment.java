@@ -2,7 +2,6 @@ package com.example.unicontrol.fragments;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
@@ -25,17 +24,22 @@ import androidx.fragment.app.Fragment;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import com.example.unicontrol.R;
+import com.example.unicontrol.utils.SettingsManager;
 
 public class AppsFragment extends Fragment {
+
+    // --- FALLBACKS: Wichtig für MainActivity und SettingsFragment ---
+    public static final String KEY_APPS_LOCAL = "apps_local";
+    public static final String KEY_APPS_PUBLIC = "apps_public";
+    public static final String KEY_COLOR_APPS = "color_apps";
+    // ----------------------------------------------------------------
 
     private WebView webView;
     private ProgressBar progressBar;
     private SwipeRefreshLayout swipeRefreshLayout;
 
-    // Die Keys aus den Settings
-    public static final String KEY_APPS_LOCAL = "apps_local";
-    public static final String KEY_APPS_PUBLIC = "apps_public";
-    public static final String KEY_COLOR_APPS = "color_apps";
+    // Unser zentraler SettingsManager
+    private SettingsManager settingsManager;
 
     @Nullable
     @Override
@@ -48,26 +52,27 @@ public class AppsFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        settingsManager = SettingsManager.getInstance(requireContext());
+
         webView = view.findViewById(R.id.webview_apps);
         progressBar = view.findViewById(R.id.progressBar);
-        swipeRefreshLayout = view.findViewById(R.id.swipe_refresh); // NEU: Swipe-Layout binden
+        swipeRefreshLayout = view.findViewById(R.id.swipe_refresh);
 
         // Hintergrundfarbe setzen
-        SharedPreferences prefs = requireContext().getSharedPreferences(SettingsFragment.PREFS_NAME, Context.MODE_PRIVATE);
-        String hexColor = prefs.getString(KEY_COLOR_APPS, "#D3B8E8"); // Flieder als Standard
+        String hexColor = settingsManager.getColorApps();
         try {
             view.setBackgroundColor(Color.parseColor(hexColor));
             webView.setBackgroundColor(Color.parseColor(hexColor));
         } catch (Exception ignored) {}
 
-        // NEU: Logik für das Herunterziehen (Pull-to-Refresh)
+        // Logik für das Herunterziehen (Pull-to-Refresh)
         swipeRefreshLayout.setOnRefreshListener(() -> {
             if (webView != null) {
                 webView.reload(); // Lade die aktuelle Seite der WebView neu
             }
         });
 
-        // WebView Settings (Sehr wichtig für moderne Web-Apps wie dein Backend)
+        // WebView Settings
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
@@ -92,7 +97,6 @@ public class AppsFragment extends Fragment {
                     progressBar.setProgress(newProgress);
                 } else {
                     progressBar.setVisibility(View.GONE);
-                    // NEU: Wenn der Ladevorgang fertig ist, verstecken wir das runde Lade-Symbol des SwipeRefreshLayouts
                     if (swipeRefreshLayout.isRefreshing()) {
                         swipeRefreshLayout.setRefreshing(false);
                     }
@@ -101,7 +105,7 @@ public class AppsFragment extends Fragment {
         });
 
         // URL ermitteln und laden
-        String targetUrl = determineUrl(prefs);
+        String targetUrl = determineUrl();
         if (targetUrl != null && !targetUrl.isEmpty()) {
             if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
                 targetUrl = "http://" + targetUrl;
@@ -109,17 +113,16 @@ public class AppsFragment extends Fragment {
             webView.loadUrl(targetUrl);
         } else {
             Toast.makeText(getContext(), "Bitte konfiguriere zuerst die App-Entwicklung URLs in den Einstellungen.", Toast.LENGTH_LONG).show();
-            // Falls fehlerhaft beendet, Animation abbrechen
             if (swipeRefreshLayout.isRefreshing()) {
                 swipeRefreshLayout.setRefreshing(false);
             }
         }
     }
 
-    private String determineUrl(SharedPreferences prefs) {
-        String localUrl = prefs.getString(KEY_APPS_LOCAL, "192.168.86.46:8767");
-        String publicUrl = prefs.getString(KEY_APPS_PUBLIC, "coldnet.dedyn.io:8767");
-        String homeSsid = prefs.getString(SettingsFragment.KEY_WIFI_SSID, "");
+    private String determineUrl() {
+        String localUrl = settingsManager.getAppsLocal();
+        String publicUrl = settingsManager.getAppsPublic();
+        String homeSsid = settingsManager.getWifiSsid();
 
         if (isAtHome(homeSsid)) {
             return localUrl;
